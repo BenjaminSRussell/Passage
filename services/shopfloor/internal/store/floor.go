@@ -330,9 +330,13 @@ func ingestMachine(ctx context.Context, tx pgx.Tx, tenantID string, now time.Tim
 			return IngestResult{}, err
 		}
 	}
+	set, err := andonSettings(ctx, tx, tenantID)
+	if err != nil {
+		return IngestResult{}, err
+	}
 	if open != nil {
 		res.DowntimesOpen = 1
-		if domain.AndonDue(open.start, now) {
+		if set.Due(open.start, now) {
 			raised, err := raiseAndon(ctx, tx, tenantID, m, open)
 			if err != nil {
 				return IngestResult{}, err
@@ -340,7 +344,7 @@ func ingestMachine(ctx context.Context, tx pgx.Tx, tenantID string, now time.Tim
 			res.AndonsRaised += raised
 		}
 	}
-	if _, err := clearAndon(ctx, tx, tenantID, m.resourceID, now); err != nil {
+	if _, err := clearAndon(ctx, tx, tenantID, m.resourceID, now, set); err != nil {
 		return IngestResult{}, err
 	}
 	return res, nil
@@ -366,12 +370,12 @@ func raiseAndon(ctx context.Context, tx pgx.Tx, tenantID string, m machineRow, d
 // least AndonClearAfter before now and no downtime is open on the resource
 // (BR-25.10). It runs on the next ingest for the machine and in the andon sweep.
 // An empty resourceID covers every resource. It returns how many alerts it closed.
-func clearAndon(ctx context.Context, tx pgx.Tx, tenantID, resourceID string, now time.Time) (int, error) {
+func clearAndon(ctx context.Context, tx pgx.Tx, tenantID, resourceID string, now time.Time, set domain.AndonSettings) (int, error) {
 	tag, err := tx.Exec(ctx, `update andon_alert a set cleared_at = greatest($3, a.started_at)
 		where a.tenant_id = $1 and ($2 = '' or a.resource_id::text = $2) and a.kind = 'downtime' and a.cleared_at is null
 		and not exists (select 1 from downtime_record o where o.tenant_id = $1 and o.resource_id = a.resource_id and o.ended_at is null)
 		and exists (select 1 from downtime_record d where d.tenant_id = $1 and d.id = a.downtime_id and d.ended_at <= $4)`,
-		tenantID, resourceID, now, now.Add(-domain.AndonClearAfter))
+		tenantID, resourceID, now, now.Add(-set.ClearAfter()))
 	return int(tag.RowsAffected()), err
 }
 

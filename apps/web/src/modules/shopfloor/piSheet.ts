@@ -1,7 +1,29 @@
 // The PI sheet designer's and the kiosk runner's rules, apart from any screen (FR-25.16). A PI sheet is the ISA-88
 // structure of a control recipe: unit procedures, operations, phases and, in each phase, numbered process instructions.
 
-import type { Instruction, InstructionCategory, RecipeDocument } from "./api/client";
+import type { Instruction, InstructionCategory, RecipeDocument, SignatureMeaning } from "./api/client";
+
+/** Signature meanings (21 CFR 11.50): what the signer states by signing the step. */
+export const MEANING_LABEL: Record<SignatureMeaning, string> = {
+  performed: "Performed by",
+  verified: "Verified by",
+  reviewed: "Reviewed by",
+  approved: "Approved by",
+};
+
+/** The sentence a signer confirms on the kiosk before the signature is recorded. */
+export function meaningStatement(meaning: SignatureMeaning | undefined): string {
+  switch (meaning ?? "performed") {
+    case "verified":
+      return "I verified this step.";
+    case "reviewed":
+      return "I reviewed this step.";
+    case "approved":
+      return "I approve this step.";
+    default:
+      return "I performed this step.";
+  }
+}
 
 export const CATEGORY_LABEL: Record<InstructionCategory, string> = {
   "instruction-text": "Instruction",
@@ -159,7 +181,8 @@ export type EntryCheck = { ok: true; outOfLimit: boolean } | { ok: false; messag
 /** Whether a step can be completed with this entry. A value outside its limits needs a comment (BR-25.12). */
 export function checkEntry(ins: Instruction, entry: StepEntry): EntryCheck {
   if (ins.category === "signature-request") {
-    return entry.value.trim() === "" ? { ok: false, message: "Type your name to sign." } : { ok: true, outOfLimit: false };
+    if (entry.value.trim() === "") return { ok: false, message: "Type your name to sign." };
+    return entry.comment === "confirmed" ? { ok: true, outOfLimit: false } : { ok: false, message: `Confirm the statement "${meaningStatement(ins.meaning)}" to sign.` };
   }
   if (ins.category !== "process-data-request" && ins.category !== "inspection-characteristic") return { ok: true, outOfLimit: false };
   const c = ins.characteristic;
@@ -210,7 +233,14 @@ export function messageFor(recipeId: string, step: RunStep, entry: StepEntry | u
     return { ...base, categoryCode: ins.category === "inspection-characteristic" ? "quality-result" : "process-data", values };
   }
   if (ins.category === "signature-request" && entry && entry.value.trim() !== "") {
-    return { ...base, categoryCode: "process-data", values: [{ name: "signed-by", type: "text", value: entry.value.trim() }] };
+    return {
+      ...base,
+      categoryCode: "process-data",
+      values: [
+        { name: "signed-by", type: "text", value: entry.value.trim() },
+        { name: "signature-meaning", type: "text", value: ins.meaning ?? "performed" },
+      ],
+    };
   }
   return null;
 }

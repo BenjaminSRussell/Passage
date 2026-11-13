@@ -76,7 +76,14 @@ describe("running a sheet on the kiosk", () => {
     const set = flattenSteps(doc([{ seq: 1, category: "process-parameter-setpoint", value: 72, characteristic: { name: "Jacket", type: "numeric", unit: "degC", min: 60, max: 90 } }]))[0]!;
     expect(messageFor("rec-1", set, undefined)?.values[0]).toEqual({ name: "Jacket", type: "numeric", value: "72", min: "60", max: "90", unit: "degC" });
     const sign = flattenSteps(doc([{ seq: 1, category: "signature-request", text: "Sign" }]))[0]!;
-    expect(messageFor("rec-1", sign, { value: " Ana ", comment: "" })?.values).toEqual([{ name: "signed-by", type: "text", value: "Ana" }]);
+    expect(messageFor("rec-1", sign, { value: " Ana ", comment: "confirmed" })?.values).toEqual([
+      { name: "signed-by", type: "text", value: "Ana" },
+      { name: "signature-meaning", type: "text", value: "performed" },
+    ]);
+    expect(checkEntry({ seq: 1, category: "signature-request", text: "Sign.", meaning: "approved" }, { value: "Ana", comment: "" })).toEqual({
+      ok: false,
+      message: 'Confirm the statement "I approve this step." to sign.',
+    });
     expect(messageFor("rec-1", flattenSteps(doc([{ seq: 1, category: "instruction-text", text: "Read" }]))[0]!, undefined)).toBeNull();
   });
 
