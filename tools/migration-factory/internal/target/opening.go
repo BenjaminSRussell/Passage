@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/shopspring/decimal"
 
@@ -23,6 +24,8 @@ const (
 
 	dutyInventoryImport     = "inventory.import.write"
 	dutyInventoryImportRead = "inventory.import.read"
+	dutyInventoryRead       = "inventory.read"
+	pathInventoryOnHand     = "/v1/inventory/onhand"
 	dutyTreasuryImport      = "treasury.import.write"
 	dutyTreasuryImportRead  = "treasury.import.read"
 
@@ -35,8 +38,10 @@ const (
 // Problem codes of the two targets the factory acts on.
 const (
 	CodeInventoryRowsInvalid = "INV-OPB-001"
-	CodeTreasuryRowsInvalid  = "TRS-0601"
-	CodeTreasuryRowsRefused  = "TRS-0602"
+	// CodeInventoryRowsHeld names rows whose reference another batch of the legal entity already opened (a cross-batch duplicate).
+	CodeInventoryRowsHeld   = "INV-OPB-005"
+	CodeTreasuryRowsInvalid = "TRS-0601"
+	CodeTreasuryRowsRefused = "TRS-0602"
 )
 
 // OpeningBatchResult is a target's answer to an accepted batch.
@@ -75,7 +80,8 @@ type stockBatch struct {
 	Value     string `json:"value"`
 }
 
-// LoadBatch sends one batch of 1 to 1000 items of one currency. A refusal for rows (INV-OPB-001) is a *RowsRefused; any
+// LoadBatch sends one batch of 1 to 1000 items of one currency. A refusal for rows (INV-OPB-001, or INV-OPB-005 for a
+// reference another batch opened) is a *RowsRefused; any
 // other 4xx is ErrRefused.
 func (i *Inventory) LoadBatch(ctx context.Context, tenantID, legalEntityID, batchKey, postingDate, currency string, items []domain.StockItem) (OpeningBatchResult, error) {
 	if !i.Configured() {
@@ -92,7 +98,7 @@ func (i *Inventory) LoadBatch(ctx context.Context, tenantID, legalEntityID, batc
 	if err != nil {
 		return OpeningBatchResult{}, err
 	}
-	return openingAnswer(status, body, batchKey, len(items), CodeInventoryRowsInvalid, "")
+	return openingAnswer(status, body, batchKey, len(items), CodeInventoryRowsInvalid, CodeInventoryRowsHeld)
 }
 
 func openingAnswer(status int, body []byte, key string, n int, rowCodes ...string) (OpeningBatchResult, error) {
@@ -115,6 +121,49 @@ func openingAnswer(status int, body []byte, key string, n int, rowCodes ...strin
 		}
 	}
 	return OpeningBatchResult{}, answerError(status, body)
+}
+
+// OnHand reads back what GET /v1/inventory/onhand reports on hand in the legal entity for each product (H-S9-2): one inquiry per
+// product grouped by legal entity, the physical inventory of the entity's group. A truncated or unreadable answer is an error, so a
+// partial read never passes for a total.
+func (i *Inventory) OnHand(ctx context.Context, tenantID, legalEntityID string, products []string) (map[string]decimal.Decimal, error) {
+	if !i.Configured() {
+		return nil, ErrNotConfigured
+	}
+	out := make(map[string]decimal.Decimal, len(products))
+	for _, p := range products {
+		q := url.Values{"product": {p}, "groupBy": {"legal_entity"}}
+		status, body, err := i.c.do(ctx, http.MethodGet, pathInventoryOnHand+"?"+q.Encode(), tenantID, legalEntityID, dutyInventoryRead, "", nil)
+		if err != nil {
+			return nil, err
+		}
+		if status != http.StatusOK {
+			return nil, answerError(status, body)
+		}
+		var res struct {
+			Items []struct {
+				Group          map[string]string `json:"group"`
+				PhysicalInvent string            `json:"physicalInvent"`
+			} `json:"items"`
+			Truncated bool `json:"truncated"`
+		}
+		if json.Unmarshal(body, &res) != nil || res.Truncated {
+			return nil, &Error{Kind: ErrBadAnswer, Status: status, Detail: "the on-hand inquiry of product " + p + " is not readable"}
+		}
+		sum := decimal.Zero
+		for _, it := range res.Items {
+			if !strings.EqualFold(it.Group["legal_entity"], legalEntityID) {
+				continue
+			}
+			v, err := decimal.NewFromString(it.PhysicalInvent)
+			if err != nil {
+				return nil, &Error{Kind: ErrBadAnswer, Status: status, Detail: "the on-hand quantity of product " + p + " is not a number"}
+			}
+			sum = sum.Add(v)
+		}
+		out[p] = sum
+	}
+	return out, nil
 }
 
 // BatchTotals reads every opening batch the inventory ledger holds for the legal entity and sums the ones the factory

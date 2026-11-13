@@ -88,6 +88,9 @@ type createBankReconRequest struct {
 	StatementID       string `json:"statementId"`
 	BookBalance       string `json:"bookBalance"`
 	OutstandingAmount string `json:"outstandingAmount"`
+	// BookBalanceSource is stated (the default: bookBalance is required) or opening: the account's first reconciliation starts
+	// from the opening book balance the migration factory loaded, and bookBalance must be left out (#49).
+	BookBalanceSource string `json:"bookBalanceSource"`
 }
 
 type setBalancesRequest struct {
@@ -125,9 +128,18 @@ func (a *API) createBankRecon(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(req.StatementID) {
 		fields["statementId"] = "must be a UUID"
 	}
-	book, bookOK := signedAmount(req.BookBalance)
-	if !bookOK {
-		fields["bookBalance"] = "must be a decimal string"
+	fromOpening := req.BookBalanceSource == "opening"
+	book := decimal.Zero
+	switch {
+	case req.BookBalanceSource != "" && req.BookBalanceSource != "stated" && !fromOpening:
+		fields["bookBalanceSource"] = "must be stated or opening"
+	case fromOpening && strings.TrimSpace(req.BookBalance) != "":
+		fields["bookBalance"] = "leave it out: the reconciliation starts from the migrated opening balance"
+	case !fromOpening:
+		var bookOK bool
+		if book, bookOK = signedAmount(req.BookBalance); !bookOK {
+			fields["bookBalance"] = "must be a decimal string"
+		}
 	}
 	outstanding := decimal.Zero
 	if strings.TrimSpace(req.OutstandingAmount) != "" {
@@ -141,7 +153,7 @@ func (a *API) createBankRecon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	created, err := a.recons.CreateReconciliation(r.Context(), store.NewReconciliation{
-		StatementID: strings.ToLower(req.StatementID), BookBalance: book, OutstandingAmount: outstanding}, key)
+		StatementID: strings.ToLower(req.StatementID), BookBalance: book, OutstandingAmount: outstanding, FromOpening: fromOpening}, key)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return

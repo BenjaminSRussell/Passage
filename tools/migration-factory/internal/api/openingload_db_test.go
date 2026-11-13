@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/target"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/target/targettest"
 )
@@ -80,8 +82,21 @@ func TestOpeningLoad_StockGoesToTheInventoryLedgerAndReconciles(t *testing.T) {
 	if names["target.onhand.item_count"] != "MATCH" || names["target.onhand.quantity"] != "MATCH" || names["target.onhand.value"] != "MATCH" {
 		t.Fatalf("reconciliation %+v", detail.Reconciliation)
 	}
+	// H-S9-2: the on-hand inquiry reports, per product, what the batches loaded.
+	readBack := 0
+	for _, c := range detail.Reconciliation {
+		if c.Name == "target.onhand.onhand_quantity" {
+			readBack++
+			if c.Status != "MATCH" {
+				t.Fatalf("on-hand read-back %+v", c)
+			}
+		}
+	}
+	if readBack != 2 {
+		t.Fatalf("read-back lines %d, want one per product (2): %+v", readBack, detail.Reconciliation)
+	}
 	for _, c := range e.inv.Calls() {
-		if len(c.Duties) != 1 || (c.Duties[0] != "inventory.import.write" && c.Duties[0] != "inventory.import.read") {
+		if len(c.Duties) != 1 || (c.Duties[0] != "inventory.import.write" && c.Duties[0] != "inventory.import.read" && c.Duties[0] != "inventory.read") {
 			t.Fatalf("each token carries one duty of the grant: %+v", c)
 		}
 	}
@@ -94,6 +109,26 @@ func TestOpeningLoad_StockGoesToTheInventoryLedgerAndReconciles(t *testing.T) {
 	}
 	if n := e.scalar(t, `select count(*) from opening_load_row where run_id = $1 and status = 'LOADED'`, run.RunID); n != 3 {
 		t.Fatalf("loaded rows %d", n)
+	}
+}
+
+// Stock that is not on hand after the import (moved, or lost in the ledger) shows as a read-back mismatch per product (H-S9-2).
+func TestOpeningLoad_OnHandReadBackCatchesStockThatIsNotOnHand(t *testing.T) {
+	e := newOpenEnv(t, 3)
+	run := e.startPack(t, onhandPath, onhandBody("USMF", "", cleanOnhand...))
+	e.inv.OnHandDrift[prodPump] = decimal.NewFromInt(-1)
+	got := e.openingLoad(t, run.RunID, stockLoadBody(""), http.StatusOK)
+	if got.Status != "MISMATCH" {
+		t.Fatalf("load %+v, want MISMATCH", got)
+	}
+	detail := decode[openingLoadDetailDTO](t, e.do(t, "GET", "/api/v1/migration/runs/"+run.RunID+"/opening-load", ""))
+	for _, c := range detail.Reconciliation {
+		if c.Name == "target.onhand.onhand_quantity" && c.Key["product"] == prodPump && c.Status != "MISMATCH" {
+			t.Fatalf("pump read-back %+v", c)
+		}
+		if c.Name == "target.onhand.onhand_quantity" && c.Key["product"] == prodBolt && c.Status != "MATCH" {
+			t.Fatalf("bolt read-back %+v", c)
+		}
 	}
 }
 

@@ -16,6 +16,59 @@ import (
 // CodeOpeningKeyConflict is a batch key sent again with other content.
 const CodeOpeningKeyConflict = "INV-OPB-002"
 
+// ReleaseOpeningReferences drops the references a batch reserved, when the import stopped before its journal was posted (#49). A
+// batch that was recorded keeps them: those references opened stock.
+func (s *Postgres) ReleaseOpeningReferences(ctx context.Context, legalEntityID, batchKey string) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `delete from inventory_opening_reference r where r.tenant_id = $1 and r.legal_entity_id = $2 and r.batch_key = $3
+			and not exists (select 1 from inventory_opening_batch b where b.tenant_id = r.tenant_id and b.batch_key = r.batch_key)`, p.TenantID, legalEntityID, batchKey)
+		return err
+	})
+}
+
+// errReferencesHeld rolls back a reservation that found references of another batch.
+var errReferencesHeld = errors.New("opening references held by another batch")
+
+// ReserveOpeningReferences reserves the batch's references for its legal entity under the batch key, all or nothing (#49): a
+// reference opens stock once per legal entity across batches. It returns, for each reference another batch holds, that batch's
+// key; then nothing is reserved. References the same key reserved before (a resend) are kept.
+func (s *Postgres) ReserveOpeningReferences(ctx context.Context, legalEntityID, batchKey string, refs []string) (map[string]string, error) {
+	p, _ := tenant.FromContext(ctx)
+	held := map[string]string{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into inventory_opening_reference (tenant_id, legal_entity_id, reference, batch_key)
+			select $1, $2, r, $3 from unnest($4::text[]) as r on conflict (tenant_id, legal_entity_id, reference) do nothing`,
+			p.TenantID, legalEntityID, batchKey, refs); err != nil {
+			return scopeProblem(err)
+		}
+		rows, err := tx.Query(ctx, `select reference, batch_key from inventory_opening_reference
+			where tenant_id = $1 and legal_entity_id = $2 and reference = any($3::text[]) and batch_key <> $4`, p.TenantID, legalEntityID, refs, batchKey)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var ref, key string
+			if err := rows.Scan(&ref, &key); err != nil {
+				return err
+			}
+			held[ref] = key
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(held) > 0 {
+			return errReferencesHeld
+		}
+		return nil
+	})
+	if errors.Is(err, errReferencesHeld) {
+		return held, nil
+	}
+	return nil, err
+}
+
 // OpeningBatch is one opening-stock batch of the migration factory: an OPENING_BALANCE journal that the import
 // created, approved and posted. Value is the sum of quantity times cost price, unrounded (twelve decimals).
 type OpeningBatch struct {

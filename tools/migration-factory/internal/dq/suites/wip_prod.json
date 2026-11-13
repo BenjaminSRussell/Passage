@@ -1,0 +1,17 @@
+{
+  "pack": "wip_prod",
+  "expectations": [
+    {"type": "expect_column_values_to_not_be_null", "check": "legacy_id_present", "column": "legacyId"},
+    {"type": "expect_column_values_to_be_unique", "check": "legacy_id_unique", "column": "legacyId", "skip_blank": true},
+    {"type": "expect_column_values_to_be_unique", "check": "production_order_unique", "column": "productionOrder"},
+    {"type": "expect_column_values_to_be_in_set", "check": "currency_iso4217", "column": "currency", "set": "iso4217"},
+    {"type": "expect_column_values_to_have_max_decimal_places", "check": "measures_at_most_6_places", "column": "material", "places": 6},
+    {"type": "expect_column_values_to_have_max_decimal_places", "check": "measures_at_most_6_places", "column": "labor", "places": 6},
+    {"type": "expect_column_values_to_have_max_decimal_places", "check": "measures_at_most_6_places", "column": "overhead", "places": 6},
+    {"type": "expect_column_values_to_not_be_null", "check": "production_order_required", "column": "productionOrder"},
+    {"type": "expect_column_values_to_be_in_set", "check": "item_in_master", "column": "item", "set": "items"},
+    {"type": "expect_column_values_to_be_between", "check": "components_not_negative", "column": "material", "min": "0"},
+    {"type": "expect_column_values_to_be_between", "check": "components_not_negative", "column": "labor", "min": "0"},
+    {"type": "expect_column_values_to_be_between", "check": "components_not_negative", "column": "overhead", "min": "0"}
+  ]
+}

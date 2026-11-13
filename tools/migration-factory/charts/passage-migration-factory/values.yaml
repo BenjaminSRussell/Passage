@@ -36,6 +36,9 @@ inventory:
   url: ""
 treasury:
   url: ""
+# The migration service, whose cross-reference resolves the legacy customers of an open-items run (H-S8-6).
+migration:
+  url: ""
 signing:
   secretName: ""
   secretKey: PASSAGE_SERVICE_SIGNING_KEY

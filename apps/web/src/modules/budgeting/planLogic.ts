@@ -136,36 +136,168 @@ export function parseCostCenterWeights(text: string): { costCenter: string; weig
   return out;
 }
 
-export interface GenerateForm {
-  source: "prior-plan" | "gl-actuals";
-  adjustment: string;
-  accounts: string;
-  costCenters: string;
+export type GenerateSourceKind = import("./api/plans").GenerateSource;
+
+export const GENERATE_SOURCES: { value: GenerateSourceKind; label: string }[] = [
+  { value: "prior-plan", label: "Last year's approved plan" },
+  { value: "gl-actuals", label: "What was posted last year" },
+  { value: "fixed-assets", label: "Depreciation of the fixed assets" },
+  { value: "positions", label: "Cost of the HR positions" },
+  { value: "projects", label: "Project forecasts" },
+  { value: "demand", label: "Demand forecast times unit price" },
+];
+
+export interface RateRow {
+  jobCode: string;
+  monthlyCost: string;
 }
+export interface DepartmentRow {
+  departmentId: string;
+  costCenter: string;
+}
+export interface ProjectRow {
+  projectId: string;
+  modelId: string;
+  costCenter: string;
+  amount: "cost" | "sales";
+}
+export interface UnitPriceRow {
+  itemId: string;
+  price: string;
+}
+
+export interface GenerateForm {
+  source: GenerateSourceKind;
+  adjustment: string;
+  /** prior-plan and gl-actuals: the accounts, separated by commas. */
+  accounts: string;
+  /** gl-actuals, fixed-assets and demand: CC1=2, CC2=1. */
+  costCenters: string;
+  /** The account the fixed-assets, positions, projects and demand amounts are planned on. */
+  account: string;
+  book: string;
+  modelCode: string;
+  rates: RateRow[];
+  departments: DepartmentRow[];
+  projects: ProjectRow[];
+  unitPrices: UnitPriceRow[];
+}
+
+export const emptyRate = (): RateRow => ({ jobCode: "", monthlyCost: "" });
+export const emptyDepartment = (): DepartmentRow => ({ departmentId: "", costCenter: "" });
+export const emptyProject = (): ProjectRow => ({ projectId: "", modelId: "", costCenter: "", amount: "cost" });
+export const emptyUnitPrice = (): UnitPriceRow => ({ itemId: "", price: "" });
+
+export function emptyGenerate(): GenerateForm {
+  return { source: "prior-plan", adjustment: "", accounts: "", costCenters: "", account: "", book: "", modelCode: "", rates: [emptyRate()], departments: [emptyDepartment()], projects: [emptyProject()], unitPrices: [emptyUnitPrice()] };
+}
+
+/** The driver sources: amounts read from another service (FR-38.14) and planned on one account. */
+export const isDriverSource = (s: GenerateSourceKind) => s === "fixed-assets" || s === "positions" || s === "projects" || s === "demand";
+/** The sources whose one amount per month is shared over cost centers by weight. */
+export const usesWeights = (s: GenerateSourceKind) => s === "gl-actuals" || s === "fixed-assets" || s === "demand";
+
+const MONEY4 = /^\d{1,15}(\.\d{1,4})?$/;
+const PROJECT_ID = /^[A-Z0-9][A-Z0-9-]{0,19}$/;
+const MAX_SOURCE_ROWS = 200;
+const positive = (v: string) => MONEY4.test(v.trim()) && Number(v.trim()) > 0;
 
 export function validateGenerate(f: GenerateForm): Record<string, string> {
   const errors: Record<string, string> = {};
   const adj = f.adjustment.trim();
   if (adj !== "" && (!/^-?\d{1,4}(\.\d{1,4})?$/.test(adj) || Number(adj) <= -100 || Number(adj) > 1000)) errors.adjustment = "Enter a percentage above -100 and at most 1000, such as 5 or -10.";
-  const accounts = parseAccounts(f.accounts);
-  if (new Set(accounts).size !== accounts.length) errors.accounts = "An account appears twice.";
-  if (f.source === "gl-actuals") {
-    if (accounts.length === 0) errors.accounts = "Name the accounts to read from the ledger.";
+  if (!isDriverSource(f.source)) {
+    const accounts = parseAccounts(f.accounts);
+    if (new Set(accounts).size !== accounts.length) errors.accounts = "An account appears twice.";
+    if (f.source === "gl-actuals" && accounts.length === 0) errors.accounts = "Name the accounts to read from the ledger.";
+  } else {
+    const account = f.account.trim();
+    if (account === "" || account.length > 100) errors.account = "Name the account the amounts are planned on.";
+  }
+  if (usesWeights(f.source)) {
     const weights = parseCostCenterWeights(f.costCenters);
     if (weights === null) errors.costCenters = "Write each cost center as CC1 or CC1=2 (the weight), separated by commas.";
     else if (weights.length === 0) errors.costCenters = "Name at least one cost center.";
     else if (weights.every((w) => Number(w.weight) === 0)) errors.costCenters = "Give at least one cost center a weight above zero.";
     else if (new Set(weights.map((w) => w.costCenter)).size !== weights.length) errors.costCenters = "A cost center appears twice.";
   }
+  const rowsError = (rows: unknown[], name: string, what: string) => {
+    if (rows.length === 0 || rows.length > MAX_SOURCE_ROWS) errors[name] = `Add 1 to ${MAX_SOURCE_ROWS} ${what}.`;
+  };
+  switch (f.source) {
+    case "fixed-assets":
+      if (f.book.trim().length > 50) errors.book = "A book code has at most 50 characters.";
+      break;
+    case "positions": {
+      rowsError(f.rates, "rates", "job costs");
+      const jobs = new Set<string>();
+      f.rates.forEach((r, i) => {
+        const job = r.jobCode.trim();
+        if (job === "") errors[`rates.${i}.jobCode`] = "Enter the job code.";
+        else if (jobs.has(job)) errors[`rates.${i}.jobCode`] = "This job appears twice.";
+        jobs.add(job);
+        if (!positive(r.monthlyCost)) errors[`rates.${i}.monthlyCost`] = "Enter a monthly cost above 0, such as 6500.";
+      });
+      rowsError(f.departments, "departments", "departments");
+      const deps = new Set<string>();
+      f.departments.forEach((d, i) => {
+        if (d.departmentId === "") errors[`departments.${i}.departmentId`] = "Choose the department.";
+        else if (deps.has(d.departmentId)) errors[`departments.${i}.departmentId`] = "This department appears twice.";
+        deps.add(d.departmentId);
+        if (d.costCenter.trim() === "" || d.costCenter.trim().length > 100) errors[`departments.${i}.costCenter`] = "Enter the cost center.";
+      });
+      break;
+    }
+    case "projects": {
+      rowsError(f.projects, "projects", "projects");
+      const pairs = new Set<string>();
+      f.projects.forEach((p, i) => {
+        if (!PROJECT_ID.test(p.projectId)) errors[`projects.${i}.projectId`] = "Choose the project.";
+        if (p.modelId === "") errors[`projects.${i}.modelId`] = "Choose the forecast model.";
+        else if (pairs.has(`${p.projectId}|${p.modelId}`)) errors[`projects.${i}.modelId`] = "This project and forecast appear twice.";
+        pairs.add(`${p.projectId}|${p.modelId}`);
+        if (p.costCenter.trim() === "" || p.costCenter.trim().length > 100) errors[`projects.${i}.costCenter`] = "Enter the cost center.";
+      });
+      break;
+    }
+    case "demand": {
+      const code = f.modelCode.trim();
+      if (code === "" || code.length > 100) errors.modelCode = "Enter the code of the planning forecast.";
+      rowsError(f.unitPrices, "unitPrices", "items with a price");
+      const items = new Set<string>();
+      f.unitPrices.forEach((u, i) => {
+        if (u.itemId === "") errors[`unitPrices.${i}.itemId`] = "Choose the item.";
+        else if (items.has(u.itemId)) errors[`unitPrices.${i}.itemId`] = "This item appears twice.";
+        items.add(u.itemId);
+        if (!positive(u.price)) errors[`unitPrices.${i}.price`] = "Enter a unit price above 0, such as 12.50.";
+      });
+      break;
+    }
+  }
   return errors;
 }
 
 export function toGenerateInput(f: GenerateForm): import("./api/plans").GenerateInput {
-  const accounts = parseAccounts(f.accounts);
-  return {
-    source: f.source,
-    ...(f.adjustment.trim() !== "" ? { adjustmentPct: f.adjustment.trim() } : {}),
-    ...(accounts.length > 0 ? { accounts } : {}),
-    ...(f.source === "gl-actuals" ? { costCenters: parseCostCenterWeights(f.costCenters) ?? [] } : {}),
-  };
+  const base = { source: f.source, ...(f.adjustment.trim() !== "" ? { adjustmentPct: f.adjustment.trim() } : {}) };
+  const weights = usesWeights(f.source) ? { costCenters: parseCostCenterWeights(f.costCenters) ?? [] } : {};
+  switch (f.source) {
+    case "prior-plan":
+    case "gl-actuals": {
+      const accounts = parseAccounts(f.accounts);
+      return { ...base, ...(accounts.length > 0 ? { accounts } : {}), ...weights };
+    }
+    case "fixed-assets":
+      return { ...base, account: f.account.trim(), ...(f.book.trim() !== "" ? { book: f.book.trim() } : {}), ...weights };
+    case "positions":
+      return {
+        ...base,
+        account: f.account.trim(),
+        rates: f.rates.map((r) => ({ jobCode: r.jobCode.trim(), monthlyCost: r.monthlyCost.trim() })),
+        departments: f.departments.map((d) => ({ departmentId: d.departmentId, costCenter: d.costCenter.trim() })),
+      };
+    case "projects":
+      return { ...base, account: f.account.trim(), projects: f.projects.map((p) => ({ projectId: p.projectId, modelId: p.modelId, costCenter: p.costCenter.trim(), amount: p.amount })) };
+    case "demand":
+      return { ...base, account: f.account.trim(), modelCode: f.modelCode.trim(), unitPrices: f.unitPrices.map((u) => ({ itemId: u.itemId, price: u.price.trim() })), ...weights };
+  }
 }

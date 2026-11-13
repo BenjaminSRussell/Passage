@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 
 	"github.com/shopspring/decimal"
@@ -23,6 +24,10 @@ const (
 	codeSourceUnmapped    = "BUD-0065" // a department of HR has no cost center in the request
 	maxSourceRows         = 200
 )
+
+// projectIDPattern is the form of a project id in the projects service (project.id, such as P-1001): projects are keyed by
+// their code, not by a UUID.
+var projectIDPattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9-]{0,19}$`)
 
 type sourceRate struct {
 	JobCode     string          `json:"jobCode"`
@@ -119,8 +124,8 @@ func validateSourceParams(req generateRequest) map[string]string {
 				f[fmt.Sprintf("projects[%d].modelId", i)] = "the project and forecast model appear twice"
 			}
 			pairs[[2]string{p.ProjectID, p.ModelID}] = true
-			if !ids.Valid(p.ProjectID) {
-				f[fmt.Sprintf("projects[%d].projectId", i)] = "must be a project id"
+			if !projectIDPattern.MatchString(p.ProjectID) {
+				f[fmt.Sprintf("projects[%d].projectId", i)] = "must be a project id (capital letters, digits and hyphens, up to 20)"
 			}
 			if !ids.Valid(p.ModelID) {
 				f[fmt.Sprintf("projects[%d].modelId", i)] = "must be a forecast model id"

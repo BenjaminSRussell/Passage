@@ -1075,6 +1075,8 @@ components:
         icNetInvestment: { type: boolean }
         fxGainLossAccount: { type: string }
         method: { type: string, enum: [full, equity], default: full, description: 'full consolidates the unit line by line (E1 to E6); equity takes an associate or joint venture (up to 50 percent held) with the equity method into one line and the investments register, from investmentCost as its opening carrying amount in the first year.' }
+        icReceivableAccount: { type: string, pattern: '^[A-Za-z0-9._:-]{1,64}$', description: 'The main account in the unit''s own ledger that holds its receivable from the holder. A run over a collection reads the E2 receivable from it (debit balance, unit currency); an ic.icReceivable for the unit is then refused.' }
+        parentPayableAccount: { type: string, pattern: '^[A-Za-z0-9._:-]{1,64}$', description: 'The main account in the holder''s ledger that holds the payable to this unit. A run over a collection reads the E2 payable from it (credit balance, the holder must keep its ledger in the group currency); an ic.payableGroup for the unit is then refused.' }
     IcLayers:
       type: object
       required: [layers]
@@ -1115,6 +1117,9 @@ components:
               dividends: { type: string }
               closingCarrying: { type: string }
               unrecognizedLoss: { type: string, description: The part of a share of loss above the carrying amount that is not recognized (IAS 28.38) }
+              unitCurrency: { type: string, description: 'A foreign associate''s own currency; its carrying amount is retranslated at the closing rate (IAS 21.44, IAS 28)' }
+              closingCarryingUnit: { type: string, description: The closing carrying amount in the associate's own currency, the base of the next retranslation }
+              fxDifference: { type: string, description: 'The exchange difference of the retranslation (group currency), booked as EQ-FX to ASSOCIATE_TRANSLATION_RESERVE and part of the run''s CTA' }
     UnitTerms:
       allOf:
         - $ref: '#/components/schemas/UnitTermsRequest'

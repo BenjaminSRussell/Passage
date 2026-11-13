@@ -391,3 +391,51 @@ func (s *Server) sendChunk(ctx context.Context, tenantID string, load domain.Tar
 	}
 	return outs, nil
 }
+
+// XrefResolver resolves legacy keys through the migration service's cross-reference; *target.Xref implements it.
+type XrefResolver interface {
+	Configured() bool
+	Resolve(ctx context.Context, tenantID, legalEntityID, system, entity string, keys []string) (map[string]string, error)
+}
+
+// WithXref sets the cross-reference the open-items load resolves legacy customers through (H-S8-6). Without one, a customer that is
+// neither on the record, in load.customerIds nor a UUID is rejected MIG-REF-UNRESOLVED at load, as before.
+func (s *Server) WithXref(x XrefResolver) *Server { s.xref = x; return s }
+
+// CodeXrefUnavailable is the cross-reference of the party migration not answering when a run needs it.
+const CodeXrefUnavailable = "MIG-1565"
+
+// resolveCustomers fills load.customerIds for the AR records whose legacy party has no Passage customer yet (not on the record,
+// not in the map, not a UUID) from the customers the party migration loaded into the run's legal entity: the key is the legacy
+// company and the party (company|party, as the migration service keys a customer), else the party alone.
+func (s *Server) resolveCustomers(ctx context.Context, tenantID string, cfg *domain.TargetConfig, records []domain.Record, extras map[string]domain.TargetExtra, sys domain.SourceSystem, company string) error {
+	if s.xref == nil || !s.xref.Configured() || cfg == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var keys []string
+	for _, rec := range records {
+		x := extras[domain.OpenItemKey(rec.Side(), strings.TrimSpace(rec.LegacyID))]
+		party := strings.TrimSpace(rec.Party)
+		if rec.Side() == domain.LedgerAP || party == "" || x.CustomerID != "" || cfg.Customers[party] != "" || ids.Valid(party) || seen[party] {
+			continue
+		}
+		seen[party] = true
+		keys = append(keys, company+"|"+party, party)
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	found, err := s.xref.Resolve(ctx, tenantID, cfg.LegalEntityID, target.MigrationSystem(string(sys)), "customer", keys)
+	if err != nil {
+		return httpx.NewProblem(http.StatusBadGateway, CodeXrefUnavailable, "the party migration's cross-reference could not be read to resolve the legacy customers: "+err.Error())
+	}
+	for party := range seen {
+		if id := found[company+"|"+party]; ids.Valid(id) {
+			cfg.Customers[party] = id
+		} else if id := found[party]; ids.Valid(id) {
+			cfg.Customers[party] = id
+		}
+	}
+	return nil
+}

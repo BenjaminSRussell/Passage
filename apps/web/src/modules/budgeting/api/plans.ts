@@ -184,16 +184,39 @@ export function compareScenarios(planId: string, base: string, other: string, gr
   return request(`${BASE}/plans/${encodeURIComponent(planId)}/scenarios:compare${query({ base, other, groupBy })}`, { signal });
 }
 
-export type GenerateSource = "prior-plan" | "gl-actuals";
+export type GenerateSource = "prior-plan" | "gl-actuals" | "fixed-assets" | "positions" | "projects" | "demand";
 
 export interface GenerateInput {
   source: GenerateSource;
   adjustmentPct?: string;
   accounts?: string[];
   costCenters?: { costCenter: string; weight: string }[];
+  /** The account the fixed-assets, positions, projects and demand amounts are planned on. */
+  account?: string;
+  book?: string;
+  rates?: { jobCode: string; monthlyCost: string }[];
+  departments?: { departmentId: string; costCenter: string }[];
+  projects?: { projectId: string; modelId: string; costCenter: string; amount?: "cost" | "sales" }[];
+  modelCode?: string;
+  unitPrices?: { itemId: string; price: string }[];
 }
 
-/** Fills a Draft scenario from last year's approved plan or last year's posted actuals (FR-38.14). */
+/** A project forecast model, as the projects service lists it (the projects source names one per project). */
+export interface ProjectForecastModel {
+  id: string;
+  projectId: string;
+  name: string;
+  currency: string;
+}
+
+export function listProjectForecasts(projectId: string, signal?: AbortSignal): Promise<{ items: ProjectForecastModel[] }> {
+  return request(`/api/v1/projects/${encodeURIComponent(projectId)}/forecasts`, { signal });
+}
+
+/**
+ * Fills a Draft scenario (FR-38.14) from last year's approved plan, last year's posted actuals, or the drivers: the depreciation
+ * of the fixed assets, the cost of the HR positions, project forecasts or the demand forecast times a unit price.
+ */
 export function generateGrid(planId: string, scenarioId: string, version: number, input: GenerateInput, key: string): Promise<GridWritten> {
   return request(`${BASE}/plans/${encodeURIComponent(planId)}/scenarios/${encodeURIComponent(scenarioId)}:generate`, {
     method: "POST",

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
@@ -446,6 +448,10 @@ func (u unreachableStore) RejectOpeningRows(context.Context, string, string, tim
 	return nil
 }
 func (u unreachableStore) ListOpeningRejects(context.Context, string, int) ([]store.OpeningRejectRow, error) {
+	u.fail()
+	return nil, nil
+}
+func (u unreachableStore) OpeningOnHandExpected(context.Context, string) (map[string]decimal.Decimal, error) {
 	u.fail()
 	return nil, nil
 }

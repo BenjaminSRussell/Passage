@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/dq"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
@@ -307,12 +308,23 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	if err := s.resolveCustomers(r.Context(), p.TenantID, loadCfg, records, extras, sys, company); err != nil {
+		fail(w, r, err)
+		return
+	}
 	partyIDs := splitIDs(req.Parties)
 	parties := make(map[string]struct{}, len(partyIDs))
 	for _, id := range partyIDs {
 		parties[id] = struct{}{}
 	}
 	accepted, quarantined := domain.Validate(records, parties)
+	openItemKey := func(rec domain.Record) string { return domain.OpenItemKey(rec.Side(), rec.LegacyID) }
+	accepted, quarantined, err = gateSuite(domain.PackOpenItems, records, dq.OpenItemRows(records), map[string]map[string]bool{"parties": dq.SetOf(parties), "iso4217": dq.ISO4217()},
+		openItemKey, openItemKey, accepted, quarantined, func(rec domain.Record, why string) domain.Quarantined { return quarantine(rec, nil, why) })
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	if err := domain.QuarantineShareExceeded(len(quarantined), len(records), maxPct); err != nil {
 		fail(w, r, err)
 		return

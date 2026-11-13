@@ -486,6 +486,10 @@ type termsBody struct {
 	// Method is full (the default: consolidated line by line, E1 to E6) or equity (an associate or joint venture, up to 50 percent,
 	// taken with the equity method and shown in the investments register).
 	Method string `json:"method"`
+	// ICReceivableAccount and ParentPayableAccount name the pair accounts a run reads the E2 amounts from (FR-40.6): the account in
+	// the unit's ledger that holds its receivable from the holder, and the account in the holder's ledger that holds the payable to it.
+	ICReceivableAccount  string `json:"icReceivableAccount,omitempty"`
+	ParentPayableAccount string `json:"parentPayableAccount,omitempty"`
 }
 
 type termsResponse struct {
@@ -499,7 +503,8 @@ func toTermsResponse(rec store.UnitTermsRecord) termsResponse {
 	t := rec.UnitTerms
 	return termsResponse{UnitID: rec.UnitID, UpdatedBy: rec.UpdatedBy, UpdatedAt: rec.UpdatedAt.UTC(), termsBody: termsBody{
 		InvestmentCost: t.InvestmentCost.String(), ShareCapital: t.ShareCapital.String(), PreAcquisitionRE: t.PreAcquisitionRE.String(), HistoricalRate: t.HistoricalRate.String(),
-		SellerIsSubsidiary: t.SellerIsSubsidiary, ICNetInvestment: t.ICNetInvestment, FXGainLossAccount: t.FXGainLossAccount, Method: methodOf(t.Method)}}
+		SellerIsSubsidiary: t.SellerIsSubsidiary, ICNetInvestment: t.ICNetInvestment, FXGainLossAccount: t.FXGainLossAccount, Method: methodOf(t.Method),
+		ICReceivableAccount: t.ICReceivableAccount, ParentPayableAccount: t.ParentPayableAccount}}
 }
 
 func methodOf(m string) string {
@@ -533,7 +538,13 @@ func (a *API) setUnitTerms(w http.ResponseWriter, r *http.Request) {
 		InvestmentCost: f.get("investmentCost", body.InvestmentCost, false), ShareCapital: f.get("shareCapital", body.ShareCapital, false),
 		PreAcquisitionRE: f.get("preAcquisitionRe", body.PreAcquisitionRE, false), HistoricalRate: f.get("historicalRate", body.HistoricalRate, true),
 		SellerIsSubsidiary: body.SellerIsSubsidiary, ICNetInvestment: body.ICNetInvestment, FXGainLossAccount: body.FXGainLossAccount,
-		Method: methodOf(body.Method),
+		Method:              methodOf(body.Method),
+		ICReceivableAccount: body.ICReceivableAccount, ParentPayableAccount: body.ParentPayableAccount,
+	}
+	for name, v := range map[string]string{"icReceivableAccount": body.ICReceivableAccount, "parentPayableAccount": body.ParentPayableAccount} {
+		if v != "" && !accountCode.MatchString(v) {
+			f[name] = "must be 1 to 64 letters, digits or . _ : -"
+		}
 	}
 	if !domain.ValidMethod(body.Method) {
 		f["method"] = "must be full or equity"

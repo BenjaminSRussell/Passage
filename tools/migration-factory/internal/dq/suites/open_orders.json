@@ -1,0 +1,20 @@
+{
+  "pack": "open_orders",
+  "expectations": [
+    {"type": "expect_column_values_to_not_be_null", "check": "legacy_id_present", "column": "legacyId"},
+    {"type": "expect_column_values_to_match_regex", "check": "order_type_known", "column": "orderType", "regex": "^(SALES|PURCHASE)$"},
+    {"type": "expect_compound_columns_to_be_unique", "check": "legacy_id_unique_per_order_type", "columns": ["orderType", "legacyId"], "skip_blank": true},
+    {"type": "expect_column_values_to_not_be_null", "check": "order_and_line_number_required", "column": "orderNumber"},
+    {"type": "expect_column_values_to_not_be_null", "check": "order_and_line_number_required", "column": "lineNumber"},
+    {"type": "expect_compound_columns_to_be_unique", "check": "order_line_unique", "columns": ["orderType", "orderNumber", "lineNumber"]},
+    {"type": "expect_column_values_to_be_in_set", "check": "item_in_master", "column": "item", "set": "items"},
+    {"type": "expect_column_values_to_be_in_set_chosen_by_column", "check": "party_in_master", "column": "party", "by": "orderType", "sets": {"SALES": "customers", "PURCHASE": "vendors"}},
+    {"type": "expect_column_values_to_not_be_null", "check": "unit_required", "column": "unit"},
+    {"type": "expect_column_values_to_be_between", "check": "ordered_quantity_positive", "column": "orderedQty", "min": "0", "strict_min": true},
+    {"type": "expect_column_values_to_be_between", "check": "delivered_quantity_not_negative", "column": "deliveredQty", "min": "0"},
+    {"type": "expect_column_pair_values_A_to_be_greater_than_B", "check": "line_still_open", "column_A": "orderedQty", "column_B": "deliveredQty"},
+    {"type": "expect_column_values_to_be_between", "check": "unit_price_not_negative", "column": "unitPrice", "min": "0"},
+    {"type": "expect_column_values_to_match_strftime_format", "check": "delivery_date_iso", "column": "deliveryDate", "strftime_format": "%Y-%m-%d", "skip_blank": true},
+    {"type": "expect_column_values_to_be_in_set", "check": "currency_iso4217", "column": "currency", "set": "iso4217"}
+  ]
+}
