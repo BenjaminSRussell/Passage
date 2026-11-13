@@ -20,8 +20,8 @@ import {
 } from "../../shell/ui";
 import { createOrder, describeProblem, getCustomerGroup, newKey, ORDER_TYPES, type NewOrder, type OrderType, type Problem, type Proposal } from "./api/client";
 import { sentence, today, UUID } from "./format";
-import { emptyLine, validateLines, type LineValues } from "./lines";
-import { emptyOneTime, OneTimeFields, validateOneTime, type OneTimeValues } from "./OneTimeFields";
+import { emptyLine, lineErrorTarget, validateLines, type LineValues } from "./lines";
+import { emptyOneTime, OneTimeFields, oneTimeTarget, validateOneTime, type OneTimeValues } from "./OneTimeFields";
 import { LinesEditor } from "./LinesEditor";
 import { OrderProposals } from "./OrderProposals";
 import styles from "./pages.module.css";
@@ -90,7 +90,10 @@ const NEW_ORDER_FIELDS: Record<string, FormFieldTarget> = {
   requestedShipDate: { id: "order-requestedShipDate", label: "Requested ship date" },
   externalRef: { id: "order-externalRef", label: "Customer reference" },
   listingOverrideReason: { id: "order-listingOverrideReason", label: "Listing override reason" },
+  lines: { label: "Lines" },
 };
+
+const orderRowTarget = (key: string) => lineErrorTarget(key) ?? oneTimeTarget(key);
 
 /** Order entry: header and lines, stored as a DRAFT order (FR-27.2). */
 export function NewOrderPage() {
@@ -200,7 +203,7 @@ export function NewOrderPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New sales order">
-          <FormErrorSummary items={summaryItems(errors, NEW_ORDER_FIELDS)} attempt={attempt} />
+          <FormErrorSummary items={summaryItems(errors, NEW_ORDER_FIELDS, orderRowTarget)} attempt={attempt} />
           {lookup("legalEntityId", "legalEntity", "Legal entity", "The selling legal entity.")}
           {lookup("customerId", "customer", "Customer", "Search by name or account number.", { legalEntityId: values.legalEntityId || undefined })}
           {lookup("invoiceAccountId", "customer", "Invoice account", "Leave empty to invoice the customer.", { legalEntityId: values.legalEntityId || undefined }, true)}

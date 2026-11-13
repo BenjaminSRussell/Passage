@@ -214,6 +214,7 @@ const refusalTitle: Record<string, string> = {
 
 const PROGRESS_FIELDS: Record<string, FormFieldTarget> = {
   sourceRef: { id: "progress-source", label: "Reference" },
+  lines: { label: "Lines" },
 };
 
 /** A line's quantity error is keyed `line-<lineNo>`. */

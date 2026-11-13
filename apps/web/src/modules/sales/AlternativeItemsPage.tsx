@@ -373,9 +373,6 @@ const NEW_ALTERNATIVE_RULE_FIELDS: Record<string, FormFieldTarget> = {
   priority: { id: "alt-priority", label: "Priority" },
   validFrom: { id: "alt-validFrom", label: "Valid from" },
   validTo: { id: "alt-validTo", label: "Valid to" },
-  productId: { id: "alt-check-productId", label: "Ordered product" },
-  periods: { id: "alt-check-periods", label: "Ordered product buckets" },
-  alternatives: { id: "alt-check-alternatives", label: "Alternative product buckets" },
 };
 
 /** Creates an alternative item rule (duty sales.listing.maintain). */

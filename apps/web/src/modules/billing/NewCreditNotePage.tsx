@@ -92,7 +92,16 @@ const CREDIT_FIELDS: Record<string, FormFieldTarget> = {
   creditDate: { id: "cn-date", label: "Credit date" },
   reason: { id: "cn-reason", label: "Reason" },
   chargeAmount: { id: "cn-charge", label: "Header charges to credit" },
+  lines: { label: "Lines" },
 };
+
+/** A line's quantity error is keyed `lines[i].qty` by its place in the original; its field is named by the line number. */
+function creditLineTarget(original: Invoice): (key: string) => FormFieldTarget | undefined {
+  return (key) => {
+    const line = original.lines[Number(/^lines\[(\d+)\]\.qty$/.exec(key)?.[1] ?? -1)];
+    return line ? { id: `cn-line-${line.lineNo}`, label: `Quantity to credit on line ${line.lineNo}` } : undefined;
+  };
+}
 
 function CreditForm({ original }: { original: Invoice }) {
   const navigate = useNavigate();
@@ -136,7 +145,7 @@ function CreditForm({ original }: { original: Invoice }) {
   return (
     <Card>
       <form className={styles.form} onSubmit={submit} noValidate>
-        <FormErrorSummary items={summaryItems(errors, CREDIT_FIELDS)} attempt={attempt} />
+        <FormErrorSummary items={summaryItems(errors, CREDIT_FIELDS, creditLineTarget(original))} attempt={attempt} />
         <FormField id="cn-scope" label="What to credit">
           {(c) => (
             <Select {...c} value={values.scope} onChange={(e) => update({ scope: e.target.value as CreditScope })}>

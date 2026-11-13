@@ -669,6 +669,13 @@ function AutoWindowFields({ id, form, set, errors }: { id: string; form: AutoFor
 const AUTO_CHARGE_CREATE_FIELDS: Record<string, FormFieldTarget> = {
   legalEntityId: { id: "ac-legal-entity", label: "Legal entity" },
   chargeCodeId: { id: "ac-code", label: "Charge code" },
+  accountId: { id: "ac-account", label: "Vendor or vendor group" },
+  itemId: { id: "ac-item", label: "Product or product group" },
+  value: { id: "ac-value", label: "Value" },
+  minOrderAmount: { id: "ac-min", label: "Minimum order amount" },
+  currency: { id: "ac-currency", label: "Currency" },
+  validFrom: { id: "ac-from", label: "Valid from" },
+  validTo: { id: "ac-to", label: "Valid to" },
 };
 
 /** Create form for an auto charge; ?chargeCodeId= preselects the code. */

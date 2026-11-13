@@ -289,7 +289,14 @@ const RFQTYPE_CREATE_FIELDS: Record<string, FormFieldTarget> = {
   legalEntityId: { id: "rt-legal-entity", label: "Legal entity" },
   code: { id: "rt-code", label: "Code" },
   name: { id: "rt-name", label: "Name" },
+  criteria: { label: "Scoring criteria" },
 };
+
+/** A criterion's error is keyed `criteria[i].name` or `criteria[i].weight`. */
+function criterionTarget(key: string): FormFieldTarget | undefined {
+  const match = /^criteria\[(\d+)\]\.(name|weight)$/.exec(key);
+  return match ? { id: `rt-criterion-${match[1]}-${match[2]}`, label: `Criterion ${Number(match[1]) + 1} ${match[2]}` } : undefined;
+}
 
 /** Create form for an RFQ type. */
 export function RFQTypeCreatePage() {
@@ -327,7 +334,7 @@ export function RFQTypeCreatePage() {
     <div className={styles.stack}>
       <PageHeader title="New RFQ type" description="A code is unique within its legal entity and cannot be renamed; deactivate it instead of deleting it." />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
-        <FormErrorSummary items={summaryItems(errors, RFQTYPE_CREATE_FIELDS)} attempt={attempt} />
+        <FormErrorSummary items={summaryItems(errors, RFQTYPE_CREATE_FIELDS, criterionTarget)} attempt={attempt} />
         <TypeFields id="rt" form={form} set={set} errors={errors} creating />
         <Alert tone="danger" live="alert">
           {failure ? <ProblemMessage problem={failure} /> : null}

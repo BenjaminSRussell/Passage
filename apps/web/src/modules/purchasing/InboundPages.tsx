@@ -102,11 +102,6 @@ const columns: ListColumn<InboundChange>[] = [
   { key: "settled", header: "Settled", render: (c) => settledLabel(c) },
 ];
 
-/**
- * Changes from other services: the planning messages a planner applied to a purchase order and the closed or
- * cancelled drop-ships, as the purchasing consumer handled them. A refused change is the buyer's to settle: it
- * is listed here with the rule that stopped it, and its page retries or acknowledges it.
- */
 const filters: ListFilterDef[] = [
   { kind: "select", key: "source", label: "From", anyLabel: "All sources", options: SOURCES.map((s) => ({ value: s, label: sourceLabel(s) })) },
   { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
@@ -123,6 +118,11 @@ const filters: ListFilterDef[] = [
   },
 ];
 
+/**
+ * Changes from other services: the planning messages a planner applied to a purchase order and the closed or
+ * cancelled drop-ships, as the purchasing consumer handled them. A refused change is the buyer's to settle: it
+ * is listed here with the rule that stopped it, and its page retries or acknowledges it.
+ */
 export function InboundChangesPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();

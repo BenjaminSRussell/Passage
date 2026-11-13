@@ -674,7 +674,28 @@ const MODEL_SERVICE_SPEC_CREATE_FIELDS: Record<string, FormFieldTarget> = {
   code: { id: "ms-code", label: "Code" },
   name: { id: "ms-name", label: "Name" },
   currency: { id: "ms-currency", label: "Currency" },
+  outline: { label: "Outline" },
 };
+
+const OUTLINE_TARGETS: Record<string, [string, string]> = {
+  kind: ["kind", "kind"],
+  depth: ["depth", "nesting level"],
+  description: ["description", "description"],
+  productId: ["product", "service product"],
+  qty: ["qty", "quantity"],
+  unit: ["unit", "unit"],
+  unitPrice: ["price", "unit price"],
+};
+
+/** An outline row's error is keyed `outline[i].field`; the model form's rows are the `msr` fields. */
+function outlineTarget(key: string): FormFieldTarget | undefined {
+  const match = /^outline\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const target = OUTLINE_TARGETS[field];
+  const row = `Row ${Number(i) + 1}`;
+  return target ? { id: `msr-${i}-${target[0]}`, label: `${row} ${target[1]}` } : { label: row };
+}
 
 /** Create form for a model service specification. */
 export function ModelServiceSpecCreatePage() {
@@ -712,7 +733,7 @@ export function ModelServiceSpecCreatePage() {
     <div className={styles.stack}>
       <PageHeader title="New model service specification" description="A code is unique within its legal entity and cannot be renamed; deactivate a model instead of deleting it." />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
-        <FormErrorSummary items={summaryItems(errors, MODEL_SERVICE_SPEC_CREATE_FIELDS)} attempt={attempt} />
+        <FormErrorSummary items={summaryItems(errors, MODEL_SERVICE_SPEC_CREATE_FIELDS, outlineTarget)} attempt={attempt} />
         <Card title="Model">
           <ModelFields id="ms" form={form} set={(patch) => setForm((f) => ({ ...f, ...patch }))} errors={errors} creating />
         </Card>

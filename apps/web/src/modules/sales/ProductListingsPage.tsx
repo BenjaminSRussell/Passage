@@ -200,6 +200,7 @@ export function ProductListingsPage() {
 const NEW_PRODUCT_LISTING_FIELDS: Record<string, FormFieldTarget> = {
   legalEntityId: { id: "listing-legalEntityId", label: "Legal entity" },
   productId: { id: "listing-productId", label: "Product" },
+  scopeKey: { id: "listing-scopeKey", label: "Customer or customer group" },
   validFrom: { id: "listing-validFrom", label: "Valid from" },
   validTo: { id: "listing-validTo", label: "Valid to" },
 };

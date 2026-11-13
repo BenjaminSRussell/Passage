@@ -208,7 +208,17 @@ const NEW_SCHEDULE_RELEASE_FIELDS: Record<string, FormFieldTarget> = {
   releaseNo: { id: "release-no", label: "Release number" },
   releaseType: { id: "release-type", label: "Type" },
   cumReceived: { id: "release-received", label: "Cumulative received (customer)" },
+  buckets: { label: "Requirement dates" },
 };
+
+/** A requirement date's error is keyed `buckets[i].date` or `buckets[i].cumRequired`. */
+function bucketTarget(key: string): FormFieldTarget | undefined {
+  const match = /^buckets\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const target = field === "date" ? { id: `release-${i}-date`, label: "date" } : field === "cumRequired" ? { id: `release-${i}-cum`, label: "cumulative required" } : undefined;
+  return { id: target?.id, label: `Requirement ${Number(i) + 1}${target ? ` ${target.label}` : ""}` };
+}
 
 /** Stores a new release. A held release (cumulative mismatch) is a result to review, not a failure. */
 export function NewScheduleReleasePage() {
@@ -256,7 +266,7 @@ export function NewScheduleReleasePage() {
       <PageHeader title="New scheduling release" description="Enter the customer's release as received. It is reconciled against the shipped quantity when you save." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New scheduling release">
-          <FormErrorSummary items={summaryItems(errors, NEW_SCHEDULE_RELEASE_FIELDS)} attempt={attempt} />
+          <FormErrorSummary items={summaryItems(errors, NEW_SCHEDULE_RELEASE_FIELDS, bucketTarget)} attempt={attempt} />
           <FormField id="release-no" label="Release number" hint="The customer's number for this release." error={errors.releaseNo}>
             {(control) => <Input {...control} value={values.releaseNo} onChange={(e) => update({ releaseNo: e.target.value })} invalid={Boolean(errors.releaseNo)} />}
           </FormField>

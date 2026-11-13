@@ -249,7 +249,23 @@ const SCHEDULING_AGREEMENT_CREATE_FIELDS: Record<string, FormFieldTarget> = {
   targetQty: { id: "sa-target", label: "Target quantity" },
   validFrom: { id: "sa-valid-from", label: "Valid from" },
   validTo: { id: "sa-valid-to", label: "Valid to" },
+  "profile.firmZoneDays": { id: "sa-firm", label: "Firm zone (days)" },
+  "profile.tradeoffZoneDays": { id: "sa-tradeoff", label: "Trade-off zone (days)" },
+  "profile.jitHorizonDays": { id: "sa-jit", label: "JIT horizon (days)" },
+  "profile.frcHorizonDays": { id: "sa-frc", label: "FRC horizon (days)" },
+  lines: { label: "Deliveries" },
 };
+
+/** A delivery's error is keyed `lines[i].deliveryDate` or `lines[i].qty`. */
+function deliveryTarget(key: string): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const row = `Delivery ${Number(i) + 1}`;
+  if (field === "deliveryDate") return { id: `sa-line-${i}-date`, label: `${row} date` };
+  if (field === "qty") return { id: `sa-line-${i}-qty`, label: `${row} quantity` };
+  return { label: row };
+}
 
 /** New scheduling agreement: header, price term, release profile and the first schedule (FR-17.15). */
 export function SchedulingAgreementCreatePage() {
@@ -316,7 +332,7 @@ export function SchedulingAgreementCreatePage() {
         description="One vendor, product and site with an agreed price, a release profile and the dated quantities to deliver."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
-        <FormErrorSummary items={summaryItems(errors, SCHEDULING_AGREEMENT_CREATE_FIELDS)} attempt={attempt} />
+        <FormErrorSummary items={summaryItems(errors, SCHEDULING_AGREEMENT_CREATE_FIELDS, deliveryTarget)} attempt={attempt} />
         <Card title="Agreement">
           <div className={styles.grid}>
             <LookupFormField id="sa-legal-entity" label="Legal entity" entity="legalEntity" value={header.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => setH({ legalEntityId })} />

@@ -188,6 +188,7 @@ const PROFILE_FIELDS: Record<string, FormFieldTarget> = {
   overdueAr: { id: "profile-overdueAr", label: "Overdue AR" },
   oldestItemDays: { id: "profile-oldestItemDays", label: "Oldest item, days overdue" },
   dunningLevel: { id: "profile-dunningLevel", label: "Dunning level" },
+  exposure: { id: "profile-openAr", label: "Exposure" },
 };
 
 function ProfileForm({ initial, etag, existing, updatedAt }: FormProps) {

@@ -140,7 +140,23 @@ const NEW_FREE_TEXT_INVOICE_FIELDS: Record<string, FormFieldTarget> = {
   invoiceDate: { id: "ft-date", label: "Invoice date" },
   paymentTermDays: { id: "ft-terms", label: "Payment terms (days)" },
   chargeAmount: { id: "ft-charge", label: "Header charge" },
+  installmentTerms: { label: "Instalments" },
 };
+
+const FREE_TEXT_ROW_LABELS: Record<string, Record<string, string>> = {
+  lines: { description: "description", qty: "quantity", unitPrice: "unit price", discountPct: "discount %", revenueAccount: "revenue account", taxCode: "tax code" },
+  installmentTerms: { percent: "share %", offsetDays: "due after (days)" },
+};
+
+/** A line's error is keyed `lines[i].field`, an instalment's `installmentTerms[i].field`. */
+function freeTextRowTarget(key: string): FormFieldTarget | undefined {
+  const match = /^(lines|installmentTerms)\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, group, i, field] = match;
+  const label = FREE_TEXT_ROW_LABELS[group][field];
+  const row = `${group === "lines" ? "Line" : "Instalment"} ${Number(i) + 1}`;
+  return { id: label ? `ft-${group === "lines" ? "line" : "inst"}-${i}-${field}` : undefined, label: label ? `${row} ${label}` : row };
+}
 
 /** Free-text invoice (FR-29.4): account-driven lines with a tax code each, saved as a proposal. */
 export function NewFreeTextInvoicePage() {
@@ -250,7 +266,7 @@ export function NewFreeTextInvoicePage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormErrorSummary items={summaryItems(errors, NEW_FREE_TEXT_INVOICE_FIELDS)} attempt={attempt} />
+          <FormErrorSummary items={summaryItems(errors, NEW_FREE_TEXT_INVOICE_FIELDS, freeTextRowTarget)} attempt={attempt} />
           <LookupFormField id="ft-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           <LookupFormField
             id="ft-customer"

@@ -208,7 +208,41 @@ const NEW_SHIPMENT_PROPOSAL_FIELDS: Record<string, FormFieldTarget> = {
   legalEntityId: { id: "sp-legal-entity", label: "Legal entity" },
   customerId: { id: "sp-customer", label: "Customer" },
   invoiceAccountId: { id: "sp-account", label: "Invoice account" },
+  currency: { id: "sp-currency", label: "Currency" },
+  invoiceDate: { id: "sp-date", label: "Invoice date" },
+  paymentTermDays: { id: "sp-terms", label: "Payment terms (days)" },
 };
+
+const SLIP_LABELS: Record<string, string> = { id: "packing slip", orderId: "sales order", date: "slip date", chargeAmount: "slip charge" };
+const SLIP_LINE_LABELS: Record<string, string> = {
+  id: "slip line id",
+  orderLineId: "order line id",
+  productId: "product",
+  description: "description",
+  qty: "shipped quantity",
+  unitPrice: "unit price",
+  discountPct: "discount %",
+  revenueAccount: "revenue account",
+  taxCode: "tax code",
+  priceExplainRef: "price explanation",
+};
+
+/** A slip's error is keyed `slips[i].field`, a slip line's `slips[i].lines[j].field`; an unknown field still names its row. */
+function shipmentRowTarget(key: string): FormFieldTarget | undefined {
+  const line = /^slips\[(\d+)\]\.lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (line) {
+    const [, i, j, field] = line;
+    const label = SLIP_LINE_LABELS[field];
+    return { id: label ? `sp-line-${i}-${j}-${field}` : undefined, label: `Slip ${Number(i) + 1}, line ${Number(j) + 1}${label ? ` ${label}` : ""}` };
+  }
+  const slip = /^slips\[(\d+)\]\.(\w+)$/.exec(key);
+  if (slip) {
+    const [, i, field] = slip;
+    const label = SLIP_LABELS[field];
+    return { id: label ? `sp-slip-${i}-${field}` : undefined, label: `Packing slip ${Number(i) + 1}${label ? ` ${label}` : ""}` };
+  }
+  return undefined;
+}
 
 /** Invoice shipments (FR-29.1, FR-29.2): turn posted packing slips into invoice proposals, one per order or consolidated. */
 export function NewShipmentProposalPage() {
@@ -319,7 +353,7 @@ export function NewShipmentProposalPage() {
       />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormErrorSummary items={summaryItems(errors, NEW_SHIPMENT_PROPOSAL_FIELDS)} attempt={attempt} />
+          <FormErrorSummary items={summaryItems(errors, NEW_SHIPMENT_PROPOSAL_FIELDS, shipmentRowTarget)} attempt={attempt} />
           <LookupFormField id="sp-legal-entity" label="Legal entity" entity="legalEntity" value={values.legalEntityId} error={errors.legalEntityId} onChange={(legalEntityId) => update({ legalEntityId })} />
           <LookupFormField
             id="sp-customer"

@@ -279,8 +279,6 @@ const NEW_PROPOSAL_RULE_FIELDS: Record<string, FormFieldTarget> = {
   orderedProductId: { id: "proposal-orderedProductId", label: "Ordered product" },
   proposedProductId: { id: "proposal-proposedProductId", label: "Proposed product" },
   customerId: { id: "proposal-customerId", label: "Customer" },
-  productIds: { id: "proposal-check-productIds", label: "Products being ordered" },
-  currentProductIds: { id: "proposal-check-currentProductIds", label: "Products already on the order" },
 };
 
 /** Creates a product proposal rule (duty sales.listing.maintain). */

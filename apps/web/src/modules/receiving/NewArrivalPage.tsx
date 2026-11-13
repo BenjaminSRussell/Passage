@@ -132,7 +132,19 @@ const NEW_ARRIVAL_FIELDS: Record<string, FormFieldTarget> = {
   palletCount: { id: "arrival-palletCount", label: "Pallet count" },
   receiptDate: { id: "arrival-receiptDate", label: "Receipt date" },
   currency: { id: "arrival-currency", label: "Currency" },
+  lines: { label: "Lines" },
 };
+
+const ARRIVAL_LINE_LABELS: Record<string, string> = { poLineNo: "purchase order line", productId: "product", overDeliveryPct: "over-delivery percent", unit: "unit" };
+
+/** A line's error is keyed `lines[i].field`. */
+function arrivalLineTarget(key: string): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const label = ARRIVAL_LINE_LABELS[field];
+  return label ? { id: `line-${i}-${field}`, label: `Line ${Number(i) + 1} ${label}` } : { label: `Line ${Number(i) + 1}` };
+}
 
 /** Record a delivery at the dock (POST /arrivals); the receipt is registered afterwards. */
 export function NewArrivalPage() {
@@ -194,7 +206,7 @@ export function NewArrivalPage() {
       <PageHeader title="Record arrival" description="Log a delivery as it reaches the dock. You register the quantities received on the receipt afterwards." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New arrival">
-          <FormErrorSummary items={summaryItems(errors, NEW_ARRIVAL_FIELDS)} attempt={attempt} />
+          <FormErrorSummary items={summaryItems(errors, NEW_ARRIVAL_FIELDS, arrivalLineTarget)} attempt={attempt} />
           <FormField id="arrival-vendorId" label="Vendor" error={errors.vendorId}>
             {(c) => (
               <EntityLookup

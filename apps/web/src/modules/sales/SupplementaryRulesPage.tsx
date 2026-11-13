@@ -302,8 +302,6 @@ const NEW_SUPPLEMENTARY_RULE_FIELDS: Record<string, FormFieldTarget> = {
   quantityPerBase: { id: "rule-quantityPerBase", label: "Supplementary quantity" },
   unit: { id: "rule-unit", label: "Unit" },
   unitPrice: { id: "rule-unitPrice", label: "Unit price" },
-  productId: { id: "evaluate-productId", label: "Ordered product" },
-  quantity: { id: "evaluate-quantity", label: "Ordered quantity" },
 };
 
 /** Creates a supplementary item rule (duty sales.listing.maintain). */

@@ -248,6 +248,28 @@ const CATALOG_CREATE_FIELDS: Record<string, FormFieldTarget> = {
   orgUnitIds: { id: "cat-units", label: "Operating unit ids" },
 };
 
+const ENTRY_TARGETS: Record<string, [string, string]> = {
+  name: ["name", "item name"],
+  vendorId: ["vendor", "vendor"],
+  productId: ["product", "product"],
+  category: ["category", "category"],
+  unit: ["unit", "unit"],
+  unitPrice: ["price", "unit price"],
+  currency: ["currency", "currency"],
+  leadTimeDays: ["lead", "lead time (days)"],
+  imageUrl: ["image", "image link"],
+};
+
+/** An entry's error is keyed `entries[i].field`; its field ids come from that prefix, as EntryFields builds them. */
+function entryTarget(key: string): FormFieldTarget | undefined {
+  const match = /^(entries\[(\d+)\])\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, prefix, i, field] = match;
+  const target = ENTRY_TARGETS[field];
+  const row = `Item ${Number(i) + 1}`;
+  return target ? { id: `${prefix.replace(/[^a-z0-9]+/gi, "-")}-${target[0]}`, label: `${row} ${target[1]}` } : { label: row };
+}
+
 /** New catalog: header, validity, operating units and optional first entries (FR-17.18). */
 export function CatalogCreatePage() {
   const navigate = useNavigate();
@@ -306,7 +328,7 @@ export function CatalogCreatePage() {
         description="A catalog starts as a draft. Add items, then publish it so requesters can pick from it."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
-        <FormErrorSummary items={summaryItems(errors, CATALOG_CREATE_FIELDS)} attempt={attempt} />
+        <FormErrorSummary items={summaryItems(errors, CATALOG_CREATE_FIELDS, entryTarget)} attempt={attempt} />
         <Card title="Catalog">
           <div className={styles.grid}>
             <FormField id="cat-legal-entity" label="Legal entity" error={errors.legalEntityId}>

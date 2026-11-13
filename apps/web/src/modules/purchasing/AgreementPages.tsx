@@ -235,6 +235,28 @@ const PURCHASE_AGREEMENT_CREATE_FIELDS: Record<string, FormFieldTarget> = {
   validTo: { id: "pa-valid-to", label: "Valid to" },
 };
 
+const AGREEMENT_LINE_TARGETS: Record<string, [string, string]> = {
+  commitmentType: ["type", "commitment"],
+  productId: ["product", "product"],
+  category: ["category", "category"],
+  unit: ["unit", "unit"],
+  committedQty: ["committed", "committed quantity"],
+  committedAmount: ["committed", "committed amount"],
+  unitPrice: ["price", "unit price"],
+  discountPct: ["discount", "discount %"],
+  maxEnforced: ["enforced", "limit"],
+};
+
+/** A line's error is keyed `lines[i].field`. */
+function agreementLineTarget(key: string): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const target = AGREEMENT_LINE_TARGETS[field];
+  const row = `Line ${Number(i) + 1}`;
+  return target ? { id: `pa-line-${i}-${target[0]}`, label: `${row} ${target[1]}` } : { label: row };
+}
+
 /** New purchase agreement: header, validity and commitment lines (FR-17.5). */
 export function PurchaseAgreementCreatePage() {
   const navigate = useNavigate();
@@ -283,7 +305,7 @@ export function PurchaseAgreementCreatePage() {
         description="Commit a quantity or a spend with one vendor. Purchase order lines that reference an agreement line release against it."
       />
       <form className={styles.form} onSubmit={onSubmit} noValidate>
-        <FormErrorSummary items={summaryItems(errors, PURCHASE_AGREEMENT_CREATE_FIELDS)} attempt={attempt} />
+        <FormErrorSummary items={summaryItems(errors, PURCHASE_AGREEMENT_CREATE_FIELDS, agreementLineTarget)} attempt={attempt} />
         <Card title="Agreement">
           <div className={styles.grid}>
             <FormField id="pa-legal-entity" label="Legal entity" error={errors.legalEntityId}>

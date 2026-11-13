@@ -39,7 +39,7 @@ import {
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { EntityName } from "../../shell/lookup/EntityName";
 import { formatDateTime, money, sentence, today, UUID } from "./format";
-import { emptyLine, validateLines, type LineValues } from "./lines";
+import { emptyLine, lineErrorTarget, validateLines, type LineValues } from "./lines";
 import { LinesEditor } from "./LinesEditor";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -192,6 +192,7 @@ const NEW_QUOTATION_FIELDS: Record<string, FormFieldTarget> = {
   validUntil: { id: "quotation-validUntil", label: "Valid until" },
   probabilityPct: { id: "quotation-probabilityPct", label: "Win probability %" },
   listingOverrideReason: { id: "quotation-listingOverrideReason", label: "Listing override reason" },
+  lines: { label: "Lines" },
 };
 
 /** Creates a DRAFT quotation numbered SQ- (duty sales.quotation.maintain). */
@@ -277,7 +278,7 @@ export function NewQuotationPage() {
       <PageHeader title="New sales quotation" description="The quotation is saved as a draft. Send it from the quotation page, then convert it into an order." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="New sales quotation">
-          <FormErrorSummary items={summaryItems(errors, NEW_QUOTATION_FIELDS)} attempt={attempt} />
+          <FormErrorSummary items={summaryItems(errors, NEW_QUOTATION_FIELDS, (key) => lineErrorTarget(key))} attempt={attempt} />
           {lookup("legalEntityId", "legalEntity", "Legal entity", "The selling legal entity.")}
           {lookup("customerId", "customer", "Customer", "Search by name or account number.")}
           {lookup("invoiceAccountId", "customer", "Invoice account", "Leave empty to invoice the customer.", true)}

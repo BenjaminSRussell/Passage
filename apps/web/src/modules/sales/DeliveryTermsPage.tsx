@@ -194,6 +194,7 @@ const NEW_DELIVERY_TERMS_FIELDS: Record<string, FormFieldTarget> = {
   legalEntityId: { id: "terms-legalEntityId", label: "Legal entity" },
   customerId: { id: "terms-customerId", label: "Customer" },
   transportDays: { id: "terms-transportDays", label: "Transport days" },
+  receivingDays: { id: "terms-day-1", label: "Receiving weekdays" },
 };
 
 /** Sets a customer's delivery terms (FR-27.3, duty sales.parameter.maintain). */

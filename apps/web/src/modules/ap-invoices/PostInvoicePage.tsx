@@ -118,7 +118,19 @@ const POST_INVOICE_FIELDS: Record<string, FormFieldTarget> = {
   postingDate: { id: "invoice-postingDate", label: "Posting date" },
   currency: { id: "invoice-currency", label: "Currency" },
   ledgerId: { id: "invoice-ledgerId", label: "Ledger" },
+  lines: { label: "Lines" },
 };
+
+const INVOICE_LINE_LABELS: Record<string, string> = { receiptId: "receipt", receiptLineNo: "receipt line", qty: "quantity", unitPrice: "unit price" };
+
+/** A line's error is keyed `lines[i].field`. */
+function invoiceLineTarget(key: string): FormFieldTarget | undefined {
+  const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key);
+  if (!match) return undefined;
+  const [, i, field] = match;
+  const label = INVOICE_LINE_LABELS[field];
+  return label ? { id: `inv-line-${i}-${field}`, label: `Line ${Number(i) + 1} ${label}` } : { label: `Line ${Number(i) + 1}` };
+}
 
 /** Post a vendor invoice against GR/IR items (POST /invoices:post). */
 export function PostInvoicePage() {
@@ -204,7 +216,7 @@ export function PostInvoicePage() {
       <PageHeader title="Post vendor invoice" description="Checks the AP period, clears GR/IR for the quantities invoiced and posts the vendor liability. A price difference goes to inventory, or to PPV for standard-cost lines." />
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate aria-label="Vendor invoice">
-          <FormErrorSummary items={summaryItems(errors, POST_INVOICE_FIELDS)} attempt={attempt} />
+          <FormErrorSummary items={summaryItems(errors, POST_INVOICE_FIELDS, invoiceLineTarget)} attempt={attempt} />
           {lookup("legalEntityId", "Legal entity")}
           {lookup("vendorId", "Vendor")}
           {text("invoiceNumber", "Invoice number", { hint: "Unique per vendor, ignoring case." })}

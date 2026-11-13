@@ -293,7 +293,6 @@ const NEW_DELIVERY_TOLERANCE_FIELDS: Record<string, FormFieldTarget> = {
   customerId: { id: "tol-customerId", label: "Customer" },
   overdeliveryPct: { id: "tol-overdeliveryPct", label: "Over-delivery tolerance (%)" },
   underdeliveryPct: { id: "tol-underdeliveryPct", label: "Under-delivery tolerance (%)" },
-  orderedQty: { id: "resolve-orderedQty", label: "Ordered quantity" },
 };
 
 /** Sets the tolerance of a product for a customer or for every customer (duty sales.parameter.maintain). */
