@@ -177,8 +177,8 @@ route("PUT", `${SERVICE}/work-orders/{id}/captures/{captureId}`, ({ params, quer
 });
 
 // Truck stock levels of inventory (/api/v1/inventory/truck-stock-levels): the PWA reads one truck's, the inventory screen
-// every truck of the legal entity. A refill moves the shortfall of each short product to "on its way", as the service's
-// draft transfer order does, so the screen shows the effect.
+// every truck of the legal entity, and the levels form replaces one truck's. A refill moves the shortfall of each short
+// product to "on its way", as the service's draft transfer order does, so the screen shows the effect.
 interface TruckLevel {
   productId: string;
   unit: string;
@@ -187,38 +187,91 @@ interface TruckLevel {
   onHandQty: number;
   inboundQty: number;
 }
-const truckLevels: TruckLevel[] = [
-  { productId: SEAL.id, unit: "EA", minQty: 2, maxQty: 6, onHandQty: 4, inboundQty: 0 },
-  { productId: BEARING.id, unit: "EA", minQty: 4, maxQty: 10, onHandQty: 3, inboundQty: 0 },
+interface Truck {
+  siteId: string;
+  warehouseId: string;
+  sourceSiteId: string;
+  sourceWarehouseId: string;
+  levels: TruckLevel[];
+}
+const trucks: Truck[] = [
+  {
+    siteId: PLANT.id,
+    warehouseId: TRUCK.id,
+    sourceSiteId: PLANT.code,
+    sourceWarehouseId: WAREHOUSES[2]!.code,
+    levels: [
+      { productId: SEAL.id, unit: "EA", minQty: 2, maxQty: 6, onHandQty: 4, inboundQty: 0 },
+      { productId: BEARING.id, unit: "EA", minQty: 4, maxQty: 10, onHandQty: 3, inboundQty: 0 },
+    ],
+  },
 ];
 const isShort = (l: TruckLevel) => l.onHandQty + l.inboundQty < l.minQty;
+const truckRows = (list: Truck[]) =>
+  list.flatMap((t) =>
+    t.levels.map((l) => ({
+      legalEntityId: LEGAL_ENTITY.id,
+      siteId: t.siteId,
+      warehouseId: t.warehouseId,
+      sourceSiteId: t.sourceSiteId,
+      sourceWarehouseId: t.sourceWarehouseId,
+      productId: l.productId,
+      unit: l.unit,
+      minQty: String(l.minQty),
+      maxQty: String(l.maxQty),
+      onHandQty: String(l.onHandQty),
+      inboundQty: String(l.inboundQty),
+      short: isShort(l),
+    })),
+  );
 
 route("GET", "/api/v1/inventory/truck-stock-levels", ({ query }) => {
   const warehouse = query.get("warehouseId");
-  return {
-    items:
-      warehouse && warehouse !== TRUCK.id
-        ? []
-        : truckLevels.map((l) => ({
-            legalEntityId: LEGAL_ENTITY.id,
-            siteId: PLANT.id,
-            warehouseId: TRUCK.id,
-            sourceSiteId: PLANT.code,
-            sourceWarehouseId: WAREHOUSES[2]!.code,
-            productId: l.productId,
-            unit: l.unit,
-            minQty: String(l.minQty),
-            maxQty: String(l.maxQty),
-            onHandQty: String(l.onHandQty),
-            inboundQty: String(l.inboundQty),
-            short: isShort(l),
-          })),
-  };
+  return { items: truckRows(warehouse ? trucks.filter((t) => t.warehouseId === warehouse) : trucks) };
+});
+
+interface TruckLevelsBody {
+  siteId?: string;
+  warehouseId?: string;
+  sourceSiteId?: string;
+  sourceWarehouseId?: string;
+  levels?: { productId?: string; unit?: string; minQty?: string; maxQty?: string }[];
+}
+
+route("PUT", "/api/v1/inventory/truck-stock-levels", ({ body }) => {
+  const input = (body ?? {}) as TruckLevelsBody;
+  if (!input.siteId || !input.warehouseId || !input.sourceSiteId || !input.sourceWarehouseId) {
+    return reply.problem(400, "COM-0001", "the truck and the warehouse it is refilled from are required");
+  }
+  if (input.sourceWarehouseId === input.warehouseId || input.sourceWarehouseId === WAREHOUSES.find((w) => w.id === input.warehouseId)?.code) {
+    return reply.problem(400, "COM-0001", "the truck cannot be refilled from itself", { sourceWarehouseId: "must differ from the truck's warehouse" });
+  }
+  let truck = trucks.find((t) => t.warehouseId === input.warehouseId);
+  if (!truck) {
+    truck = { siteId: input.siteId, warehouseId: input.warehouseId, sourceSiteId: "", sourceWarehouseId: "", levels: [] };
+    trucks.push(truck);
+  }
+  const held = new Map(truck.levels.map((l) => [l.productId, l]));
+  truck.siteId = input.siteId;
+  truck.sourceSiteId = input.sourceSiteId;
+  truck.sourceWarehouseId = input.sourceWarehouseId;
+  truck.levels = (input.levels ?? []).map((l) => ({
+    productId: l.productId ?? "",
+    unit: l.unit ?? "EA",
+    minQty: Number(l.minQty ?? 0),
+    maxQty: Number(l.maxQty ?? 0),
+    onHandQty: held.get(l.productId ?? "")?.onHandQty ?? 0,
+    inboundQty: held.get(l.productId ?? "")?.inboundQty ?? 0,
+  }));
+  return { items: truckRows([truck]) };
 });
 
 route("POST", "/api/v1/inventory/truck-stock:replenish", () => {
-  const short = truckLevels.filter(isShort);
-  if (short.length === 0) return { orders: [] };
-  for (const l of short) l.inboundQty = l.maxQty - l.onHandQty;
-  return { orders: [{ id: uid(454, 1), status: "DRAFT", fromWarehouseId: WAREHOUSES[2]!.code, toWarehouseId: TRUCK.id, lines: short.map((l) => ({ productId: l.productId })) }] };
+  const orders = trucks.flatMap((t, n) => {
+    const short = t.levels.filter(isShort);
+    if (short.length === 0) return [];
+    for (const l of short) l.inboundQty = l.maxQty - l.onHandQty;
+    return [{ id: uid(454, n + 1), status: "DRAFT", fromWarehouseId: t.sourceWarehouseId, toWarehouseId: t.warehouseId, lines: short.map((l) => ({ productId: l.productId })) }];
+  });
+  return { orders };
 });

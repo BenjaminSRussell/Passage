@@ -12,6 +12,7 @@ import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 export const DUTY_TRANSFER_WRITE = "inventory.transfer.write";
+export const DUTY_TRUCK_LEVELS_WRITE = "inventory.truck-stock.write";
 
 const columns: DataTableColumn<TruckStockLevel>[] = [
   { key: "warehouseId", header: "Truck", render: (row) => <Named entity="warehouse" id={row.warehouseId} /> },
@@ -35,7 +36,10 @@ export function TruckStockPage() {
   const [warehouseId, setWarehouseId] = useState(params.get("warehouseId") ?? "");
   const entity = UUID.test(legalEntityId.trim()) ? legalEntityId.trim() : "";
   const truck = UUID.test(warehouseId.trim()) ? warehouseId.trim() : "";
-  const canReplenish = holdsDuty(usePrincipalDuties(), DUTY_TRANSFER_WRITE);
+  const duties = usePrincipalDuties();
+  const canReplenish = holdsDuty(duties, DUTY_TRANSFER_WRITE);
+  const canSetLevels = holdsDuty(duties, DUTY_TRUCK_LEVELS_WRITE);
+  const levelsHref = `/inventory/truck-stock/levels${entity ? `?${new URLSearchParams(truck ? { legalEntityId: entity, warehouseId: truck } : { legalEntityId: entity }).toString()}` : ""}`;
   const load = useLoad((signal) => (entity ? listTruckStockLevels(entity, truck, signal) : Promise.resolve([])), `${entity}|${truck}`);
   const rows = load.data ?? [];
   const [busy, setBusy] = useState(false);
@@ -64,9 +68,16 @@ export function TruckStockPage() {
         title="Truck stock"
         description="The stock each technician's truck is kept at. A truck below its minimum is refilled from its source warehouse up to its maximum with a draft transfer order."
         actions={
-          <Link className={buttonClassName("ghost")} to="/inventory/transfer-orders">
-            Transfer orders
-          </Link>
+          <>
+            {canSetLevels ? (
+              <Link className={buttonClassName("primary")} to={levelsHref}>
+                Set truck levels
+              </Link>
+            ) : null}
+            <Link className={buttonClassName("ghost")} to="/inventory/transfer-orders">
+              Transfer orders
+            </Link>
+          </>
         }
       />
       <div className={styles.toolbar}>
@@ -103,7 +114,7 @@ export function TruckStockPage() {
           rows={rows}
           getRowKey={(row) => `${row.siteId}|${row.warehouseId}|${row.productId}`}
           loading={load.loading}
-          empty={{ title: "No truck levels yet", description: "Levels are set per truck through the inventory API (PUT /v1/inventory/truck-stock-levels)." }}
+          empty={{ title: "No truck levels yet", description: canSetLevels ? "Use Set truck levels to give a truck the parts it carries." : "Someone who maintains truck stock sets the parts each truck carries." }}
         />
       )}
     </div>

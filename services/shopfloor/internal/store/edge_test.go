@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -350,20 +351,67 @@ func TestEdgeConfig_PublishedVersionIsImmutable(t *testing.T) {
 }
 
 // The gateway forwards a connector certificate that names a node and no tenant; the service finds the node's
-// tenant with the definer function, for the one node asked about and for any caller, and finds nothing for an
-// id that is no node.
-func TestEdgeNodeTenantFindsTheTenantOfANode(t *testing.T) {
-	s, _, _ := setup(t)
+// tenant with the definer function, for the one node asked about and for any caller, only for a certificate the node
+// was issued and has not revoked (an allowlist on the forwarded fingerprint). No hash, no certificate, an unknown
+// fingerprint or an unknown node gives nothing. A certificate from before fingerprints were kept passes only while
+// the node has no fingerprinted certificate.
+func TestEdgeNodeTenantAcceptsOnlyTheNodesOwnCertificates(t *testing.T) {
+	s, _, admin := setup(t)
 	a, b := testkit.TenantID(61), testkit.TenantID(62)
 	na := newEdge(t, s, testkit.Ctx(a), "Plant A", "a-1")
 	nb := newEdge(t, s, testkit.Ctx(b), "Plant B", "b-1")
-	for id, want := range map[string]string{na.ID: a, nb.ID: b} {
-		got, err := s.EdgeNodeTenant(context.Background(), id)
-		if err != nil || got != want {
-			t.Fatalf("node %s: tenant %q err %v, want %q", id, got, err, want)
+	fp := func(n byte) string { return strings.Repeat(string("0123456789abcdef"[n%16]), 64) }
+	cert := func(tenantID, edgeID, serial string, fingerprint *string) {
+		t.Helper()
+		if _, err := admin.Exec(context.Background(), `insert into edge_certificate (tenant_id, id, edge_id, serial, subject, not_before, not_after, reason, fingerprint)
+			values ($1, $2, $3, $4, $5, now(), now() + interval '90 days', 'enroll', $6)`, tenantID, ids.New(), edgeID, serial, "edge:"+edgeID, fingerprint); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if got, err := s.EdgeNodeTenant(context.Background(), ids.New()); err != nil || got != "" {
-		t.Fatalf("unknown node: %q %v", got, err)
+	lookup := func(id, hash string) string {
+		t.Helper()
+		got, err := s.EdgeNodeTenant(context.Background(), id, hash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if lookup(na.ID, fp(1)) != "" {
+		t.Fatal("a node with no certificate gave an identity")
+	}
+	fa, fb := fp(1), fp(2)
+	cert(a, na.ID, "a1", &fa)
+	cert(b, nb.ID, "b1", &fb)
+	if lookup(na.ID, fa) != a || lookup(nb.ID, strings.ToUpper(fb)) != b {
+		t.Fatal("the nodes' own certificates")
+	}
+	for name, got := range map[string]string{
+		"no hash":                lookup(na.ID, ""),
+		"another node's cert":    lookup(na.ID, fb),
+		"an unknown fingerprint": lookup(na.ID, fp(3)),
+		"an unknown node":        lookup(ids.New(), fa),
+	} {
+		if got != "" {
+			t.Errorf("%s gave tenant %q", name, got)
+		}
+	}
+	if _, err := admin.Exec(context.Background(), `update edge_certificate set revoked_at = now() where serial = 'a1'`); err != nil {
+		t.Fatal(err)
+	}
+	if lookup(na.ID, fa) != "" {
+		t.Fatal("a revoked certificate still gives an identity")
+	}
+
+	// A node whose certificates predate fingerprints: any presented certificate passes (the gateway checked the CA),
+	// until the node is issued a fingerprinted one; then only that one does.
+	nc := newEdge(t, s, testkit.Ctx(a), "Plant C", "c-1")
+	cert(a, nc.ID, "c-legacy", nil)
+	if lookup(nc.ID, fp(4)) != a || lookup(nc.ID, "") != "" {
+		t.Fatal("a legacy certificate before any fingerprinted one")
+	}
+	fc := fp(5)
+	cert(a, nc.ID, "c-new", &fc)
+	if lookup(nc.ID, fp(4)) != "" || lookup(nc.ID, fc) != a {
+		t.Fatal("a legacy certificate after a fingerprinted one was issued")
 	}
 }

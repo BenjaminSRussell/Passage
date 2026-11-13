@@ -181,6 +181,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(read).Get("/v1/production/batch-orders", a.listBatchOrders)
 	r.With(read).Get("/v1/production/batch-orders/{id}", a.getBatchOrder)
 	r.With(authz.RequireDuty(DutyBatchOrderWrite)).Post("/v1/production/batch-orders/{id}:rescale", a.rescale)
+	r.With(authz.RequireDuty(DutyBatchOrderWrite)).Put("/v1/production/batch-orders/{id}/potency-adjustments", a.setPotencyAdjustments)
 	a.registerLifecycle(r)
 	a.registerRecipes(r)
 	r.With(read).Post("/v1/production/potency:consume", handle(consume))

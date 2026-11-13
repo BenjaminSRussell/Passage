@@ -25,6 +25,8 @@ type RFIDRead struct {
 	EPC          string // hexadecimal, 24 characters
 	RSSI         *int
 	ReadAt       time.Time
+	// PostedBy is the authenticated caller that posted the read; only a rule naming it acts on the read.
+	PostedBy string
 }
 
 // RFIDRejected is a read that was not stored, with its position in the batch.
@@ -50,6 +52,8 @@ type RFIDStored struct {
 	EPC       domain.EPC `json:"epc"`
 	ReceiptID string     `json:"receiptId,omitempty"`
 	LineNo    int        `json:"lineNo,omitempty"`
+	// Actions is what the reader's rules did with the read (receive the pallet, confirm its put-away).
+	Actions []RFIDAction `json:"actions,omitempty"`
 }
 
 // DedupeWindow is how close two reads of one tag at one reader must be to count as one.
@@ -58,10 +62,18 @@ const DedupeWindow = 5 * time.Second
 // IngestRFID decodes and stores a batch of reads. A read with an unreadable EPC is rejected and the rest stored. A
 // read of the same tag at the same reader within DedupeWindow of one held (earlier in the batch, in the store, or in a
 // batch from the same reader committed meanwhile) is a duplicate. A tag that is an SSCC the warehouse labelled names its receipt and pallet.
+//
+// A stored read then runs the rules of its reader (rfid_rule): receive the ASN pallet a dock portal read, or confirm
+// the put-away of the pallet read at its destination. A repeat read runs nothing.
 func (s *Store) IngestRFID(ctx context.Context, reads []RFIDRead) (RFIDIngest, error) {
 	out := RFIDIngest{Rejected: []RFIDRejected{}, Reads: []RFIDStored{}}
+	var claims undoLog
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		out = RFIDIngest{Rejected: []RFIDRejected{}, Reads: []RFIDStored{}}
+		out, claims = RFIDIngest{Rejected: []RFIDRejected{}, Reads: []RFIDStored{}}, undoLog{}
+		rules, err := rulesOf(ctx, tx, "")
+		if err != nil {
+			return err
+		}
 		// A duplicate is a read within a sliding window of another, which no unique key can hold, so the check and the
 		// insert run under a lock per reader: two batches from one reader (a portal resending) cannot both store a read.
 		// The readers are locked in order, so two batches naming the same readers cannot deadlock.
@@ -106,8 +118,8 @@ func (s *Store) IngestRFID(ctx context.Context, reads []RFIDRead) (RFIDIngest, e
 			}
 			seen[seenKey{rd.ReaderID, hex}] = append(seen[seenKey{rd.ReaderID, hex}], rd.ReadAt)
 			id := ids.New()
-			if _, err := tx.Exec(ctx, `insert into rfid_read (tenant_id, id, reader_id, antenna, location_code, epc_hex, scheme, gs1_key, serial, rssi, read_at)
-				values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, tenantID(ctx), id, rd.ReaderID, rd.Antenna, rd.LocationCode, hex, epc.Scheme, epc.Key, epc.Serial, rd.RSSI, rd.ReadAt); err != nil {
+			if _, err := tx.Exec(ctx, `insert into rfid_read (tenant_id, id, reader_id, antenna, location_code, epc_hex, scheme, gs1_key, serial, rssi, read_at, posted_by)
+				values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, tenantID(ctx), id, rd.ReaderID, rd.Antenna, rd.LocationCode, hex, epc.Scheme, epc.Key, epc.Serial, rd.RSSI, rd.ReadAt, rd.PostedBy); err != nil {
 				return err
 			}
 			stored := RFIDStored{Index: i, ID: id, EPC: epc}
@@ -117,11 +129,21 @@ func (s *Store) IngestRFID(ctx context.Context, reads []RFIDRead) (RFIDIngest, e
 					return err
 				}
 			}
+			if len(rules) > 0 {
+				acts, err := s.actOnRead(ctx, tx, rules, id, rd, epc, time.Now().UTC(), &claims)
+				if err != nil {
+					return err
+				}
+				stored.Actions = acts
+			}
 			out.Reads = append(out.Reads, stored)
 			out.Accepted++
 		}
 		return nil
 	})
+	if err != nil {
+		claims.run()
+	}
 	return out, err
 }
 
@@ -144,6 +166,11 @@ type RFIDReadRow struct {
 	Serial       string    `json:"serial,omitempty"`
 	RSSI         *int      `json:"rssi,omitempty"`
 	ReadAt       time.Time `json:"readAt"`
+	// Action, ActionOutcome, ActionDetail and ActionRef are what a rule did with the read (rfid_rule); empty when none ran.
+	Action        string `json:"action,omitempty"`
+	ActionOutcome string `json:"actionOutcome,omitempty"`
+	ActionDetail  string `json:"actionDetail,omitempty"`
+	ActionRef     string `json:"actionRef,omitempty"`
 }
 
 // RFIDFilter narrows the reads listed; Key is the GS1 key (an SSCC, say), newest first.
@@ -158,7 +185,7 @@ type RFIDFilter struct {
 func (s *Store) ListRFIDReads(ctx context.Context, f RFIDFilter) ([]RFIDReadRow, error) {
 	out := []RFIDReadRow{}
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select id::text, reader_id, antenna, location_code, epc_hex, scheme, gs1_key, serial, rssi, read_at from rfid_read
+		rows, err := tx.Query(ctx, `select id::text, reader_id, antenna, location_code, epc_hex, scheme, gs1_key, serial, rssi, read_at, action, action_outcome, action_detail, action_ref from rfid_read
 			where ($1 = '' or gs1_key = $1) and ($2 = '' or reader_id = $2) and ($3::timestamptz is null or read_at >= $3) and ($4::timestamptz is null or read_at < $4)
 			order by read_at desc, id limit $5`, f.Key, f.ReaderID, nullTime(f.From), nullTime(f.To), f.Limit)
 		if err != nil {
@@ -167,7 +194,7 @@ func (s *Store) ListRFIDReads(ctx context.Context, f RFIDFilter) ([]RFIDReadRow,
 		defer rows.Close()
 		for rows.Next() {
 			var r RFIDReadRow
-			if err := rows.Scan(&r.ID, &r.ReaderID, &r.Antenna, &r.LocationCode, &r.EPC, &r.Scheme, &r.Key, &r.Serial, &r.RSSI, &r.ReadAt); err != nil {
+			if err := rows.Scan(&r.ID, &r.ReaderID, &r.Antenna, &r.LocationCode, &r.EPC, &r.Scheme, &r.Key, &r.Serial, &r.RSSI, &r.ReadAt, &r.Action, &r.ActionOutcome, &r.ActionDetail, &r.ActionRef); err != nil {
 				return err
 			}
 			r.ReadAt = r.ReadAt.UTC()
@@ -383,9 +410,14 @@ func (s *Store) ReportAutomationOrder(ctx context.Context, id, status, reason st
 		if cur.Status != OrderPending {
 			return &domain.Error{Code: CodeAutoOrderState, Detail: fmt.Sprintf("the order is %s; only a PENDING order is reported sent or refused", cur.Status)}
 		}
-		out, err = scanOrder(tx.QueryRow(ctx, `update automation_order set status = $2, reason = $3, sent_at = case when $2 = 'SENT' then $4 else sent_at end
+		out, err = scanOrder(tx.QueryRow(ctx, `update automation_order set status = $2, reason = $3, sent_at = case when $2 = 'SENT' then $4 else sent_at end,
+			done_at = case when $2 = 'REFUSED' then $4 else done_at end
 			where id = $1 returning `+orderCols, id, status, reason, now))
-		return err
+		if err != nil || status != OrderRefused {
+			return err
+		}
+		// The PLC will not make the move: the work goes back to people, as after a fault.
+		return releaseFromStation(ctx, tx, cur.Station, cur.WorkID, cur.LineNo, "refused by the PLC: "+orDefault(reason, "no reason given"))
 	})
 	return out, err
 }
@@ -479,6 +511,26 @@ func (s *Store) IngestAutomationEvents(ctx context.Context, station string, even
 			if _, err := tx.Exec(ctx, `update automation_order set status = $2, reason = $3, done_at = $4 where id = $1`, orderID, newStatus, reason, e.At); err != nil {
 				return err
 			}
+			switch e.Kind {
+			case "fault":
+				if err := releaseFromStation(ctx, tx, station, workID, lineNo, "PLC fault: "+orDefault(reason, "no code")); err != nil {
+					return err
+				}
+			case "diverted":
+				note := "diverted by the PLC"
+				if e.Lane != "" {
+					note += " to lane " + e.Lane
+				}
+				if e.Location != "" {
+					note += " at " + e.Location
+				}
+				if e.Text != "" {
+					note += ": " + e.Text
+				}
+				if err := releaseFromStation(ctx, tx, station, workID, lineNo, note); err != nil {
+					return err
+				}
+			}
 			if e.Kind == "arrived" {
 				confirmed, err := s.confirmArrival(ctx, tx, station, orderID, workID, lineNo, now, &claims)
 				if err != nil {
@@ -496,6 +548,85 @@ func (s *Store) IngestAutomationEvents(ctx context.Context, station string, even
 		return AutomationIngest{}, err
 	}
 	return out, nil
+}
+
+func orDefault(s, def string) string {
+	if strings.TrimSpace(s) == "" {
+		return def
+	}
+	return s
+}
+
+// releaseFromStation gives the work of an order that will not complete (a fault, a divert, a cancelled order) back to
+// people: the line notes why, and a work still ASSIGNED to the station with no other live order there returns to OPEN,
+// so the next person who asks for work can move the pallet by hand. A work the station already confirmed a line of is
+// IN_PROGRESS and stays with the station; its line can be given to the PLC again with a new order.
+func releaseFromStation(ctx context.Context, tx pgx.Tx, station, workID string, lineNo int, note string) error {
+	w, err := readWork(ctx, tx, workID, true)
+	if err != nil {
+		return err
+	}
+	if err := w.NoteLine(lineNo, note); err != nil {
+		return err
+	}
+	var live bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from automation_order where work_id = $1 and station = $2 and status in ('PENDING', 'SENT'))`,
+		workID, station).Scan(&live); err != nil {
+		return err
+	}
+	if !live && w.Status == domain.WorkAssigned && w.AssignedUser == AutomationUser(station) {
+		if err := w.Release(AutomationUser(station)); err != nil {
+			return err
+		}
+	}
+	return updateWork(ctx, tx, &w)
+}
+
+// CancelInput cancels an automation order. PLCCleared says a person has made sure the PLC no longer holds the move:
+// an order already SENT is in the PLC's hands, and cancelling it here alone would let the PLC move a pallet the
+// warehouse no longer expects.
+type CancelInput struct {
+	ID         string
+	Reason     string
+	User       string
+	PLCCleared bool
+	Now        time.Time
+}
+
+// CancelAutomationOrder cancels an order that has not arrived. A REFUSED, FAULT or DIVERTED order is cancelled at once;
+// a PENDING or SENT one only with PLCCleared, since the connector may have sent the MOVE before reporting it. Its work goes back to people as after a fault. Cancelling a cancelled order
+// changes nothing; an ARRIVED order is done and cannot be cancelled.
+func (s *Store) CancelAutomationOrder(ctx context.Context, in CancelInput) (AutomationOrder, error) {
+	var out AutomationOrder
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		cur, err := scanOrder(tx.QueryRow(ctx, `select `+orderCols+` from automation_order where id = $1 for update`, in.ID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &domain.Error{Code: CodeAutoOrderNotFound, Detail: "automation order not found"}
+		}
+		if err != nil {
+			return err
+		}
+		switch cur.Status {
+		case OrderCancelled:
+			out = cur
+			return nil
+		case OrderArrived:
+			return &domain.Error{Code: CodeAutoOrderState, Detail: "the order has arrived; its move is done"}
+		case OrderSent, OrderPending:
+			// A PENDING order may already be in the PLC's hands: the connector pulls it, sends the MOVE and only then
+			// reports it sent. Either way only a person who cleared the move on the PLC may cancel it.
+			if !in.PLCCleared {
+				return &domain.Error{Code: CodeAutoOrderState, Detail: "the order may already be with the PLC (the connector sends the MOVE before it reports it): clear the move on the PLC first, then cancel it with plcCleared"}
+			}
+		}
+		out, err = scanOrder(tx.QueryRow(ctx, `update automation_order set status = 'CANCELLED', reason = $2, cancelled_by = $3, done_at = $4
+			where id = $1 returning `+orderCols, in.ID, in.Reason, in.User, in.Now))
+		if err != nil {
+			return err
+		}
+		return releaseFromStation(ctx, tx, cur.Station, cur.WorkID, cur.LineNo, "automation order cancelled: "+in.Reason)
+	})
+	return out, err
 }
 
 // confirmArrival confirms the work line of an order that just turned ARRIVED, inside the ingest's transaction and

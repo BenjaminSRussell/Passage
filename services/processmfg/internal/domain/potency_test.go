@@ -121,3 +121,35 @@ func readFixture(t *testing.T, name string, cols int) [][]string {
 	}
 	return rows[1:]
 }
+
+// Two active lines of 80 % standard charged from 100 % batches share one filler line: each needs less, and the filler
+// takes the difference of both, so the batch keeps its size.
+func TestApplyPotency_SharedCompensatingLine(t *testing.T) {
+	d := decimal.RequireFromString
+	lines := []PotencyLine{{1, LineActiveIngredient, d("100")}, {2, LineActiveIngredient, d("50")}, {3, LineIngredient, d("850")}, {4, LineByProduct, d("10")}}
+	got, err := ApplyPotency(lines, []PotencyAdjustment{
+		{LineNumber: 1, StandardPotency: d("80"), BatchPotency: d("100"), CompensatingLine: 3},
+		{LineNumber: 2, StandardPotency: d("80"), BatchPotency: d("100"), CompensatingLine: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got[1].Equal(d("80")) || !got[2].Equal(d("40")) || !got[3].Equal(d("880")) || len(got) != 3 {
+		t.Fatalf("adjusted %v", got)
+	}
+	total := got[1].Add(got[2]).Add(got[3])
+	if !total.Equal(d("1000")) {
+		t.Fatalf("batch size %s", total)
+	}
+	for name, adjs := range map[string][]PotencyAdjustment{
+		"by-product line":   {{LineNumber: 4, StandardPotency: d("1"), BatchPotency: d("1"), CompensatingLine: 3}},
+		"same line":         {{LineNumber: 1, StandardPotency: d("1"), BatchPotency: d("1"), CompensatingLine: 1}},
+		"twice":             {{LineNumber: 1, StandardPotency: d("1"), BatchPotency: d("1"), CompensatingLine: 3}, {LineNumber: 1, StandardPotency: d("1"), BatchPotency: d("1"), CompensatingLine: 2}},
+		"both roles":        {{LineNumber: 1, StandardPotency: d("1"), BatchPotency: d("1"), CompensatingLine: 3}, {LineNumber: 3, StandardPotency: d("1"), BatchPotency: d("1"), CompensatingLine: 2}},
+		"filler below zero": {{LineNumber: 3, StandardPotency: d("100"), BatchPotency: d("50"), CompensatingLine: 2}},
+	} {
+		if _, err := ApplyPotency(lines, adjs); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+}

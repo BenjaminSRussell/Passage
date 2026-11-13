@@ -60,3 +60,38 @@ func refused(node, why string) error {
 func ReadbackMatches(written, readback, tolerance float64) bool {
 	return math.Abs(written-readback) <= tolerance
 }
+
+// OPC-UA built-in data types a node can have, as ReadbackTolerance names them.
+const (
+	NodeDouble  = "Double"
+	NodeFloat   = "Float"
+	NodeBoolean = "Boolean"
+)
+
+var integerNodeTypes = map[string]bool{"SByte": true, "Byte": true, "Int16": true, "UInt16": true, "Int32": true, "UInt32": true, "Int64": true, "UInt64": true}
+
+// DefaultReadbackTolerance is the absolute tolerance of a Double node, or of a node whose type is not known (an MQTT
+// topic, a simulator).
+const DefaultReadbackTolerance = 0.001
+
+// float32Epsilon is the relative rounding of a value stored as a 32-bit float (2^-23).
+const float32Epsilon = 1.0 / (1 << 23)
+
+// ReadbackTolerance is how far the value read back may be from the value written for a node of nodeType (BR-25.15):
+// a Double node within DefaultReadbackTolerance; a Float node also within the rounding of a 32-bit float, which grows
+// with the value (1234567.89 reads back as 1234567.875); an integer or Boolean node exactly, as the writer refuses a
+// value the type cannot hold. An unknown type is treated as Double. The server applies the same rule.
+func ReadbackTolerance(nodeType string, written float64) float64 {
+	switch {
+	case nodeType == NodeFloat:
+		return math.Max(DefaultReadbackTolerance, math.Abs(written)*float32Epsilon)
+	case nodeType == NodeBoolean, integerNodeTypes[nodeType]:
+		return 0
+	}
+	return DefaultReadbackTolerance
+}
+
+// KnownNodeType reports whether t is a node type ReadbackTolerance distinguishes ("" is unknown and allowed).
+func KnownNodeType(t string) bool {
+	return t == "" || t == NodeDouble || t == NodeFloat || t == NodeBoolean || integerNodeTypes[t]
+}
