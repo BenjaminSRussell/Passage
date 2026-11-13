@@ -42,8 +42,9 @@ type HealthFunc func() (ready bool, statuses []Status)
 
 // NewGateway builds the handler. web may be nil (API only). secret, when not empty, is added to every proxied request as
 // tenant.HeaderGatewaySecret; the children started with the same PASSAGE_GATEWAY_SECRET refuse identity headers without it, so only this
-// gateway can speak for a user on the loopback ports.
-func NewGateway(guard Guard, upstreams map[string]*url.URL, web fs.FS, health HealthFunc, secret string) http.Handler {
+// gateway can speak for a user on the loopback ports. features are the optional MSI features (node, python); the web app reads them
+// from /installation.json and hides the screens of a feature that is off.
+func NewGateway(guard Guard, upstreams map[string]*url.URL, web fs.FS, health HealthFunc, secret string, features map[string]bool) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			target := upstreams[serviceOf(pr.In.URL.Path)]
@@ -83,6 +84,14 @@ func NewGateway(guard Guard, upstreams map[string]*url.URL, web fs.FS, health He
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ready": ready})
 	})
+	// Which optional features this installation has. Like /readyz it needs no token: it names only the runtimes installed, and the
+	// web app reads it before sign-in completes. The services of a feature that is off are not started either (Config.Resolve).
+	installation := installationOf(features)
+	mux.HandleFunc("/installation.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(installation)
+	})
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		trimmed, ok := strings.CutPrefix(r.URL.Path, "/api")
 		if !ok || !strings.HasPrefix(trimmed, "/") {
@@ -109,6 +118,21 @@ func NewGateway(guard Guard, upstreams map[string]*url.URL, web fs.FS, health He
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// optionalFeatures are the MSI features the installation reports; every one is listed, on or off.
+var optionalFeatures = []string{"node", "python"}
+
+type installationInfo struct {
+	Features map[string]bool `json:"features"`
+}
+
+func installationOf(features map[string]bool) installationInfo {
+	out := installationInfo{Features: map[string]bool{}}
+	for _, f := range optionalFeatures {
+		out.Features[f] = features[f]
+	}
+	return out
 }
 
 // staticHandler serves the embedded web build, falling back to index.html for client-side routes.

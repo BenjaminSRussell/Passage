@@ -90,6 +90,21 @@ Run `"C:\Program Files\Passage\bin\passage-server.exe" doctor` (add `-json` for 
 reports which optional features are active (`feature-node`, `feature-python`), whether the web app is embedded and
 whether FIPS mode is on. Exit code 0 means no check failed (warnings such as "not migrated yet" do not fail it).
 
+## Optional TypeScript and Python services
+
+`ADDLOCAL=NodeServices` installs the private Node runtime with the workflow-ts (Temporal worker, x64 only) and agents-ts bundles under
+`runtime\node\apps\`; `ADDLOCAL=PythonServices` installs the embeddable Python with routing-py and scheduler-py in
+`runtime\python\Lib\site-packages`. Each feature drops its service list into `%ProgramData%\Passage\conf.d` (`node.yaml`,
+`python.yaml`), so removing the feature removes its services. The start commands, with the ports the supervisor assigns, are
+printed by `passage-server services` (JSON; database URLs left out). The windows-msi workflow builds these bundles
+(`deploy/windows/scripts/Build-ServiceBundles.ps1`) and starts each of them with exactly those commands before packaging
+(`Test-ServiceBundles.ps1`): the Python services must answer `/healthz`, workflow-ts must reach its Temporal connect, and agents-ts's
+module graph must load.
+
+When a feature is off, the web app hides its screens: `passage-server` serves `/installation.json` (`{"features":{"node":..,"python":..}}`,
+no sign-in needed, it names only the installed runtimes) and the Windows web build reads it. Node off hides the copilot, the tool catalog
+and the agent kill switch; Python off hides transport route plans and load plans.
+
 ## Deployment tools
 
 All three consume the MSI natively; sign it and distribute the same file.
@@ -233,6 +248,10 @@ holding the EDB installer's option lines such as `superpassword=...`; the passwo
 
 - Not run on a real Windows VM yet (no installer test, no upgrade downtime measurement, no `tools/e2e` live suite against `passage-server.exe`): tracked on #213.
 - TLS from the Windows certificate store, embedded OPA and a Postgres-backed outbox relay (to drop external Kafka/Debezium) are follow-ups.
-- The TypeScript and Python services are laid out as optional features, but their per-service start commands in `features\node.yaml` and `python.yaml`
-  and their application bundles still need the packaging step for those services; hiding their screens in the web app when a feature is off is not wired.
+- agents-ts is bundled and registered, but it does not serve users under `passage-server` yet: it verifies the caller's bearer token itself
+  and the gateway removes `Authorization` before proxying, and it needs `MCP_URL` (mcp-ts, not bundled), `AGENTS_JWT_ISSUER` and
+  `AGENTS_JWKS_URL` in a `services:` entry of `passage.yaml`. workflow-ts is not bundled for arm64 (no Temporal native module for Windows arm64).
+- transport reads the route optimizer from `TMS_OPTIMIZER_URL`; set it in a `services:` entry for `transport` to the `routing-py` port
+  (`passage-server services` prints it) until the supervisor passes it.
+- The Python services' OR-Tools wheels need the Microsoft Visual C++ runtime; Windows Server images normally have it.
 - The WiX source is validated as XML here; it needs its first real `wix build` on a Windows runner.

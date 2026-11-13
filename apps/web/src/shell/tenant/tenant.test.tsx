@@ -1,12 +1,12 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { PassageModule } from "../../modules/registry";
 import { Shell } from "../Shell";
 import { json, server, useFakeServer } from "../testing/fakeServer";
 import { useWorkspaceNav } from "../workspaces/WorkspaceNav";
-import { featureForPath, filterModulesByFeatures, isFeatureOn, isPathEnabled } from "./featureRules";
-import { FeatureGate } from "./TenantSettings";
+import { featureForPath, filterModulesByFeatures, installFeatureKey, isFeatureOn, isPathEnabled, withInstallation } from "./featureRules";
+import { FeatureGate, useTenantSettingsLoader } from "./TenantSettings";
 
 useFakeServer();
 
@@ -134,6 +134,34 @@ describe("shell feature gating", () => {
       </MemoryRouter>,
     );
     expect(await within(await screen.findByRole("list", { name: "workspaces" })).findByText("Operations")).toBeInTheDocument();
+  });
+});
+
+describe("Windows install features (#607)", () => {
+  it("hides the screens of an optional runtime the installation does not have", () => {
+    const state = withInstallation(undefined, { node: false, python: true });
+    expect(isPathEnabled(state, "/copilot/kill-switch")).toBe(false);
+    expect(isPathEnabled(state, "/transport/load-plans")).toBe(true);
+    expect(isPathEnabled(state, "/transport/loads")).toBe(true);
+    expect(isPathEnabled(withInstallation(undefined, { python: false }), "/transport/routes")).toBe(false);
+    expect(withInstallation({ edi: false }, undefined)).toEqual({ edi: false });
+    expect(withInstallation({ edi: false }, { node: true })).toEqual({ edi: false, [installFeatureKey("node")]: true });
+  });
+
+  it("reads /installation.json only when served by passage-server and folds it into the features", async () => {
+    server.handler = (url) => (url.pathname === "/installation.json" ? json(200, { features: { node: false, python: true } }) : undefined);
+    const { result } = renderHook(() => useTenantSettingsLoader([], undefined, true));
+    await waitFor(() => expect(result.current.features).toEqual({ "install:node": false, "install:python": true }));
+    expect(isPathEnabled(result.current.features, "/copilot")).toBe(false);
+  });
+
+  it("asks for no installation outside passage-server and keeps every screen on when it cannot be read", async () => {
+    renderHook(() => useTenantSettingsLoader([]));
+    expect(server.calls).toHaveLength(0);
+    server.handler = () => json(404, { code: "GW-0404", detail: "no route" });
+    const { result } = renderHook(() => useTenantSettingsLoader([], undefined, true));
+    await waitFor(() => expect(server.calls.some((c) => c.url.pathname === "/installation.json")).toBe(true));
+    expect(result.current.features).toBeUndefined();
   });
 });
 

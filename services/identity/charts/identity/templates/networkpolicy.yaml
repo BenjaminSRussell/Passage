@@ -29,6 +29,20 @@ spec:
       ports:
         - { protocol: TCP, port: 8080 }
     {{- end }}
+    {{- if .Values.networkPolicy.metricsNamespaces }}
+    # The admin port (9090, /metrics only) is admitted to the Prometheus pods of the monitoring namespaces.
+    - from:
+        {{- range .Values.networkPolicy.metricsNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $.Values.networkPolicy.metricsPodLabels | nindent 14 }}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: 9090 }
+    {{- end }}
     {{- if .Values.bundle.enabled }}
     - from:
         - podSelector:

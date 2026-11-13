@@ -379,7 +379,7 @@ func checkServices(procs []Process, d Deps, add adder) {
 
 func checkFeatures(cfg Config, d Deps, add adder) {
 	runtimes := map[string]string{"node": filepath.Join("runtime", "node", "node.exe"), "python": filepath.Join("runtime", "python", "python.exe")}
-	for _, f := range []string{"node", "python"} {
+	for _, f := range optionalFeatures {
 		if !cfg.Features[f] {
 			add("feature-"+f, LevelOK, "off: %s services and their screens are disabled", f)
 			continue

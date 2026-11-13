@@ -85,10 +85,14 @@ func (h *execHandle) Stop(grace time.Duration) error {
 
 func isDone(err error) bool { return err == os.ErrProcessDone }
 
-// ReadyProbe checks a child's admin /readyz.
+// ReadyProbe checks a child's admin /readyz (or the ReadyPath its spec names).
 func ReadyProbe(client *http.Client) Prober {
 	return func(ctx context.Context, p Process) error {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/readyz", p.AdminPort), nil)
+		path := p.ReadyPath
+		if path == "" {
+			path = "/readyz"
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d%s", p.AdminPort, path), nil)
 		if err != nil {
 			return err
 		}
@@ -98,7 +102,7 @@ func ReadyProbe(client *http.Client) Prober {
 		}
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("readyz returned %d", resp.StatusCode)
+			return fmt.Errorf("%s returned %d", path, resp.StatusCode)
 		}
 		return nil
 	}

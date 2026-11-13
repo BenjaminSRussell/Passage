@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -73,6 +74,11 @@ type ServiceSpec struct {
 	Disabled bool              `yaml:"disabled"`
 	// DB is false for services that have no database.
 	NoDB bool `yaml:"noDb"`
+	// SinglePort is for a child that serves its API and its readiness check on one port (the Node and Python services):
+	// the admin port is the same as the API port.
+	SinglePort bool `yaml:"singlePort"`
+	// ReadyPath is the readiness path the supervisor probes; empty means /readyz.
+	ReadyPath string `yaml:"readyPath"`
 }
 
 const (
@@ -291,10 +297,26 @@ func (c Config) Resolve(getenv func(string) string, listDir func(string) ([]stri
 	procs := make([]Process, 0, len(names))
 	for i, n := range names {
 		s := specs[n]
-		exe := c.expand(s.Exe)
-		for j, a := range s.Args {
-			s.Args[j] = c.expand(a)
+		port, adminPort := c.BasePort+i, c.BasePort+adminOffset+i
+		if s.SinglePort {
+			adminPort = port
 		}
+		exe := c.expand(s.Exe)
+		// {port} and {adminPort} let a child that reads no HTTP_ADDR (uvicorn, the Temporal worker's HTTP_PORT) take its ports from
+		// its arguments or its own env entries. The spec's slices and maps are copied so a second Resolve starts from the template.
+		args := make([]string, len(s.Args))
+		for j, a := range s.Args {
+			args[j] = expandPorts(c.expand(a), port, adminPort)
+		}
+		s.Args = args
+		if s.Env != nil {
+			env := make(map[string]string, len(s.Env))
+			for k, v := range s.Env {
+				env[k] = expandPorts(c.expand(v), port, adminPort)
+			}
+			s.Env = env
+		}
+		specs[n] = s
 		if exe == "" {
 			return c, nil, fmt.Errorf("service %q has no exe", n)
 		}
@@ -305,7 +327,7 @@ func (c Config) Resolve(getenv func(string) string, listDir func(string) ([]stri
 		if route == "" {
 			route = routeOf(n)
 		}
-		procs = append(procs, Process{Name: n, Route: route, Exe: exe, Args: s.Args, Optional: s.Optional, Port: c.BasePort + i, AdminPort: c.BasePort + adminOffset + i})
+		procs = append(procs, Process{Name: n, Route: route, Exe: exe, Args: s.Args, Optional: s.Optional, Port: port, AdminPort: adminPort, ReadyPath: s.ReadyPath})
 	}
 	routes := map[string]string{}
 	for _, p := range procs {
@@ -333,6 +355,10 @@ func peerEnvName(name string) string {
 // expand replaces {install} and {data} in a service's exe and args.
 func (c Config) expand(v string) string {
 	return strings.NewReplacer("{install}", c.InstallDir, "{data}", c.DataDir).Replace(v)
+}
+
+func expandPorts(v string, port, adminPort int) string {
+	return strings.NewReplacer("{port}", strconv.Itoa(port), "{adminPort}", strconv.Itoa(adminPort)).Replace(v)
 }
 
 // routeOf maps a service name onto its gateway path segment; purchasing is served as procurement, as passage-dev does.

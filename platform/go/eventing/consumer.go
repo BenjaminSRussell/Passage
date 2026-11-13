@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -167,9 +169,11 @@ func (c *Consumer) process(ctx context.Context, rec Record) error {
 	}
 	actorCtx := tenant.With(ctx, actor)
 	for attempt := 1; ; attempt++ {
+		started := time.Now()
 		applied, err := c.apply(actorCtx, handler, evt)
 		if err == nil {
 			c.count(applied)
+			c.metrics.observe(time.Since(started), started.Sub(evt.Time), applied)
 			log.InfoContext(ctx, "event handled", "applied", applied)
 			return c.commit(ctx, rec, log)
 		}
@@ -242,6 +246,61 @@ func (c *Consumer) commit(ctx context.Context, rec Record, log *slog.Logger) err
 
 type Metrics struct {
 	applied, duplicates, skipped, retries, deadLettered, deadLetterFailures, commitFailures, pollFailures atomic.Int64
+	// handle is how long a successful apply took; age is how old an applied event was when its handling started (event time to
+	// apply: the consumer's end-to-end lag, which the read-model lag SLOs read, #50).
+	handle, age histogram
+}
+
+// Histogram bounds in seconds: handling is dense around tens of milliseconds, event age reaches the minutes a backlog takes.
+var (
+	handleBounds = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
+	ageBounds    = []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 300, 900, 3600}
+)
+
+type histogram struct {
+	once    sync.Once
+	buckets []atomic.Int64 // per bound, not cumulative
+	count   atomic.Int64
+	sumNs   atomic.Int64
+}
+
+func (h *histogram) observe(bounds []float64, d time.Duration) {
+	h.once.Do(func() { h.buckets = make([]atomic.Int64, len(bounds)) })
+	if d < 0 {
+		d = 0 // a producer clock ahead of ours
+	}
+	sec := d.Seconds()
+	for i, b := range bounds {
+		if sec <= b {
+			h.buckets[i].Add(1)
+			break
+		}
+	}
+	h.count.Add(1)
+	h.sumNs.Add(int64(d))
+}
+
+func (h *histogram) write(w io.Writer, metric, help, consumer string, bounds []float64) {
+	h.once.Do(func() { h.buckets = make([]atomic.Int64, len(bounds)) })
+	_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s histogram\n", metric, help, metric)
+	var cum int64
+	for i, b := range bounds {
+		cum += h.buckets[i].Load()
+		_, _ = fmt.Fprintf(w, "%s_bucket{consumer=%q,le=%q} %d\n", metric, consumer, strconv.FormatFloat(b, 'g', -1, 64), cum)
+	}
+	count := h.count.Load()
+	_, _ = fmt.Fprintf(w, "%s_bucket{consumer=%q,le=\"+Inf\"} %d\n", metric, consumer, count)
+	_, _ = fmt.Fprintf(w, "%s_sum{consumer=%q} %s\n", metric, consumer, strconv.FormatFloat(float64(h.sumNs.Load())/1e9, 'f', -1, 64))
+	_, _ = fmt.Fprintf(w, "%s_count{consumer=%q} %d\n", metric, consumer, count)
+}
+
+// observe records a successful apply. A duplicate (already in the inbox) counts for handling time only: its age says nothing
+// about lag.
+func (m *Metrics) observe(handle, age time.Duration, applied bool) {
+	m.handle.observe(handleBounds, handle)
+	if applied {
+		m.age.observe(ageBounds, age)
+	}
 }
 
 func (m *Metrics) Write(w io.Writer, name string) {
@@ -256,4 +315,6 @@ func (m *Metrics) Write(w io.Writer, name string) {
 	for _, c := range counters {
 		_, _ = fmt.Fprintf(w, "# TYPE event_consumer_%s_total counter\nevent_consumer_%s_total{consumer=%q} %d\n", c.metric, c.metric, name, c.value.Load())
 	}
+	m.handle.write(w, "event_consumer_handle_duration_seconds", "Time a successful event handling took.", name, handleBounds)
+	m.age.write(w, "event_consumer_event_age_seconds", "Age of an applied event (event time to handling start): the consumer's end-to-end lag.", name, ageBounds)
 }

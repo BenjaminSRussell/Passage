@@ -28,7 +28,7 @@ func execute(args []string, stdout, stderr io.Writer, getenv func(string) string
 		if inServiceMode() {
 			args = []string{"serve"}
 		} else {
-			_, _ = fmt.Fprintln(stderr, "usage: passage-server serve|migrate|doctor|wrap|version")
+			_, _ = fmt.Fprintln(stderr, "usage: passage-server serve|migrate|doctor|services|wrap|version")
 			return 2
 		}
 	}
@@ -44,9 +44,53 @@ func execute(args []string, stdout, stderr io.Writer, getenv func(string) string
 		return serveCmd(stderr, getenv)
 	case "wrap":
 		return wrapCmd(args[1:], stderr, getenv)
+	case "services":
+		return servicesCmd(stdout, stderr, getenv)
 	}
 	_, _ = fmt.Fprintf(stderr, "passage-server: unknown command %q\n", args[0])
 	return 2
+}
+
+// listedChild is one resolved child as `passage-server services` prints it. The database URLs are left out: they carry the
+// owner's or passage_app's password.
+type listedChild struct {
+	Name      string            `json:"name"`
+	Exe       string            `json:"exe"`
+	Args      []string          `json:"args"`
+	Env       map[string]string `json:"env"`
+	Port      int               `json:"port"`
+	AdminPort int               `json:"adminPort"`
+	ReadyPath string            `json:"readyPath"`
+	Optional  bool              `json:"optional"`
+}
+
+// servicesCmd prints, as JSON, the children serve would start with this configuration: the start command, ports and readiness
+// path of each. deploy/windows/scripts/Test-ServiceBundles.ps1 starts the Node and Python services from this list, so the start
+// commands it tests are the ones the conf.d files resolve to.
+func servicesCmd(stdout, stderr io.Writer, getenv func(string) string) int {
+	_, procs, err := loadConfig(getenv, ModeServe)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "FAIL config: %v\n", err)
+		return 1
+	}
+	out := make([]listedChild, 0, len(procs))
+	for _, p := range procs {
+		env := map[string]string{}
+		for k, v := range p.Env {
+			if k != "DATABASE_URL" && k != "MIGRATE_DATABASE_URL" {
+				env[k] = v
+			}
+		}
+		ready := p.ReadyPath
+		if ready == "" {
+			ready = "/readyz"
+		}
+		out = append(out, listedChild{Name: p.Name, Exe: p.Exe, Args: p.Args, Env: env, Port: p.Port, AdminPort: p.AdminPort, ReadyPath: ready, Optional: p.Optional})
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(out)
+	return 0
 }
 
 func doctorCmd(args []string, stdout, stderr io.Writer, getenv func(string) string) int {

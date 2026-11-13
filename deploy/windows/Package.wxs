@@ -194,7 +194,12 @@
         <RegistryValue Root="HKLM" Key="SOFTWARE\Passage\Config" Name="FEATURE_NODE" Type="string" Value="1" KeyPath="yes" />
       </Component>
       <Component Id="NodeServicesConf" Directory="CONFDFOLDER" Guid="*" Bitness="always64">
+        <!-- The Temporal SDK ships no Windows arm64 native bridge, so the arm64 package registers agents-ts only. -->
+        <?if $(sys.BUILDARCH) = "arm64" ?>
+        <File Id="NodeServicesConf" Name="node.yaml" Source="features\node-arm64.yaml" KeyPath="yes" />
+        <?else?>
         <File Id="NodeServicesConf" Name="node.yaml" Source="features\node.yaml" KeyPath="yes" />
+        <?endif?>
       </Component>
     </ComponentGroup>
   </Fragment>

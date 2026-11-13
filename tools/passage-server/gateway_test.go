@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -20,7 +22,7 @@ func testGateway(t *testing.T, ready bool) (http.Handler, *[]http.Header) {
 	u, _ := url.Parse(up.URL)
 	web := fstest.MapFS{"index.html": {Data: []byte("<html>app</html>")}, "assets/app.js": {Data: []byte("js")}}
 	passThrough := func(next http.Handler) http.Handler { return next }
-	return NewGateway(passThrough, map[string]*url.URL{"party": u}, web, func() (bool, []Status) { return ready, nil }, "gw-secret"), &seen
+	return NewGateway(passThrough, map[string]*url.URL{"party": u}, web, func() (bool, []Status) { return ready, nil }, "gw-secret", map[string]bool{"node": true}), &seen
 }
 
 func do(h http.Handler, method, target string, hdr map[string]string) *httptest.ResponseRecorder {
@@ -90,5 +92,31 @@ func TestGatewayReadiness(t *testing.T) {
 	}
 	if rec := do(g, "GET", "/healthz", nil); rec.Code != 200 {
 		t.Fatalf("healthz = %d", rec.Code)
+	}
+}
+
+func TestGatewayReportsTheInstalledFeatures(t *testing.T) {
+	g, _ := testGateway(t, true)
+	rec := do(g, "GET", "/installation.json", nil)
+	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"features":{"node":true,"python":false}}` {
+		t.Fatalf("installation = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestReadyProbeUsesTheSpecReadyPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	u, _ := url.Parse(srv.URL)
+	port, _ := strconv.Atoi(u.Port())
+	probe := ReadyProbe(srv.Client())
+	if err := probe(context.Background(), Process{AdminPort: port, ReadyPath: "/healthz"}); err != nil {
+		t.Fatalf("healthz probe: %v", err)
+	}
+	if err := probe(context.Background(), Process{AdminPort: port}); err == nil || !strings.Contains(err.Error(), "/readyz returned 404") {
+		t.Fatalf("default probe = %v", err)
 	}
 }

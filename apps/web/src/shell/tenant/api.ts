@@ -5,6 +5,8 @@ export const FEATURES_PATH = "/api/v1/tenant/features";
 export const SETUP_PATH = "/api/v1/tenant/setup";
 export const WORKSPACE_CONFIG_PATH = "/api/v1/tenant/workspace-config";
 export const DEMO_COMPANY_PATH = "/api/v1/org/demo-company";
+// Served by passage-server, the Windows install (#607), outside /api: the optional MSI features of this installation.
+export const INSTALLATION_PATH = "/installation.json";
 
 // Duties the shell checks before it calls these endpoints, so a person who cannot read them costs no request.
 export const FEATURE_VIEW_DUTY = "identity.feature.view";
@@ -30,6 +32,13 @@ export type TenantFeatures = z.infer<typeof featuresResponse>;
 
 export function fetchFeatures(signal?: AbortSignal, fetchImpl: FetchLike = defaultFetch): Promise<TenantFeatures> {
   return requestUrl("GET", FEATURES_PATH, featuresResponse, fetchImpl, {}, undefined, signal);
+}
+
+const installationResponse = z.object({ features: z.record(z.string(), z.boolean()) });
+export type Installation = z.infer<typeof installationResponse>;
+
+export function fetchInstallation(signal?: AbortSignal, fetchImpl: FetchLike = defaultFetch): Promise<Installation> {
+  return requestUrl("GET", INSTALLATION_PATH, installationResponse, fetchImpl, {}, undefined, signal);
 }
 
 export function saveFeatures(change: { template: string } | { features: Record<string, boolean> }, fetchImpl: FetchLike = defaultFetch): Promise<TenantFeatures> {

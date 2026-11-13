@@ -20,6 +20,8 @@ type Process struct {
 	Optional  bool
 	Port      int
 	AdminPort int
+	// ReadyPath is the readiness path probed on AdminPort; empty means /readyz.
+	ReadyPath string
 }
 
 // Handle is a running child.

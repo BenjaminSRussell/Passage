@@ -63,6 +63,7 @@ spec:
           {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
+            - { name: admin, containerPort: 9090 }
             {{- if .Values.bundle.enabled }}
             - { name: bundle, containerPort: {{ .Values.bundle.port }} }
             {{- end }}
