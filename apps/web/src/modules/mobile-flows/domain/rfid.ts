@@ -49,7 +49,7 @@ export interface TagScan {
 
 export interface RoundOutcome {
   scans: TagScan[];
-  /** EPCs that are not SGTIN-96 or SSCC-96, with the reason. They are logged, never scanned. */
+  /** EPCs that are not SGTIN-96, SGTIN-198 or SSCC-96, with the reason. They are logged, never scanned. */
   unreadable: { epc: string; reason: string }[];
 }
 

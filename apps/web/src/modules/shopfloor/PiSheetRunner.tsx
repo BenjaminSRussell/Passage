@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { EntityName } from "../../shell/lookup/EntityName";
 import { Alert, Button, Card, FormField, Input, Select, Textarea } from "../../shell/ui";
 import type { Instruction, RecipeDocument } from "./api/client";
-import { CATEGORY_LABEL, checkEntry, collectsValue, flattenSteps, limitsText, messageFor, type ProcessMessageDraft, type StepEntry } from "./piSheet";
+import { CATEGORY_LABEL, checkEntry, collectsValue, flattenSteps, limitsText, MEANING_LABEL, meaningStatement, messageFor, type ProcessMessageDraft, type StepEntry } from "./piSheet";
 import styles from "./pages.module.css";
 
 /**
@@ -120,10 +120,17 @@ function StepBody({ ins }: { ins: Instruction }) {
 function StepInput({ ins, entry, onChange, outOfLimit, problem }: { ins: Instruction; entry: StepEntry; onChange(next: StepEntry): void; outOfLimit: boolean; problem: string | null }) {
   const c = ins.characteristic;
   if (ins.category === "signature-request") {
+    // The signer states what the signature means (21 CFR 11.50): the confirmation travels as the entry's comment.
     return (
-      <FormField id="pi-sign" label="Your name" hint="Type your name to sign this step." error={problem ?? undefined}>
-        {(control) => <Input {...control} autoComplete="off" value={entry.value} invalid={Boolean(problem)} onChange={(e) => onChange({ ...entry, value: e.target.value })} />}
-      </FormField>
+      <div className={styles.stack}>
+        <FormField id="pi-sign" label={`${MEANING_LABEL[ins.meaning ?? "performed"]}: your name`} hint="Type your name to sign this step." error={problem ?? undefined}>
+          {(control) => <Input {...control} autoComplete="off" value={entry.value} invalid={Boolean(problem)} onChange={(e) => onChange({ ...entry, value: e.target.value })} />}
+        </FormField>
+        <label className={styles.checkRow}>
+          <input type="checkbox" checked={entry.comment === "confirmed"} onChange={(e) => onChange({ ...entry, comment: e.target.checked ? "confirmed" : "" })} />{" "}
+          {meaningStatement(ins.meaning)}
+        </label>
+      </div>
     );
   }
   const limits = limitsText(c);

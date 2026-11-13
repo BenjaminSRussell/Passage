@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"context"
+	"errors"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -22,17 +24,36 @@ func TestDocgen_TemplatesBlocksAndOutputRulesUnderRLS(t *testing.T) {
 
 	tpl := domain.DocumentTemplate{Code: "INV-STD", Name: "Standard", DocumentType: domain.DocCustomerInvoice, Default: true,
 		Config: domain.TemplateConfig{Title: "Tax invoice", HideColumns: []string{"Unit"}, NoteBlocks: []string{"TERMS"}}}
-	saved, err := s.PutTemplate(ctx, tpl)
+	saved, err := s.PutTemplate(ctx, tpl, 0, "designer-1")
 	if err != nil || saved.Version != 1 || saved.Config.Title != "Tax invoice" {
 		t.Fatalf("put: %+v %v", saved, err)
 	}
-	if again, err := s.PutTemplate(ctx, tpl); err != nil || again.Version != 2 {
+	tpl.Config.Title = "Invoice"
+	if again, err := s.PutTemplate(ctx, tpl, 1, "designer-2"); err != nil || again.Version != 2 {
 		t.Fatalf("second put: %+v %v", again, err)
+	}
+	// A save based on version 1 after version 2 was saved is refused, and nothing is stored.
+	var p *httpx.Problem
+	if _, err := s.PutTemplate(ctx, tpl, 0, "designer-1"); !errors.As(err, &p) || p.Status != 428 || p.Code != domain.CodeTemplateIfMatch {
+		t.Fatalf("replace without If-Match: %v", err)
+	}
+	if _, err := s.PutTemplate(ctx, tpl, 1, "designer-1"); !errors.As(err, &p) || p.Status != 412 || p.Code != domain.CodeTemplateStale {
+		t.Fatalf("stale If-Match: %v", err)
+	}
+	hist, err := s.ListTemplateVersions(ctx, "INV-STD")
+	if err != nil || len(hist) != 2 || hist[0].Version != 2 || hist[0].SavedBy != "designer-2" || hist[0].Config.Title != "Invoice" || hist[1].Config.Title != "Tax invoice" {
+		t.Fatalf("history: %+v %v", hist, err)
+	}
+	if _, err := s.ListTemplateVersions(ctx, "NOPE"); !errors.As(err, &p) || p.Status != 404 {
+		t.Fatalf("history of an unknown template: %v", err)
+	}
+	if _, err := s.ListTemplateVersions(tenantCtx(2), "INV-STD"); err == nil {
+		t.Fatal("another tenant reads the history")
 	}
 	// A second default of the type takes over the flag.
 	other := tpl
 	other.Code = "INV-ALT"
-	if _, err := s.PutTemplate(ctx, other); err != nil {
+	if _, err := s.PutTemplate(ctx, other, 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	def, err := s.DefaultTemplate(ctx, domain.DocCustomerInvoice)
@@ -44,7 +65,7 @@ func TestDocgen_TemplatesBlocksAndOutputRulesUnderRLS(t *testing.T) {
 	}
 	wrongType := tpl
 	wrongType.DocumentType = domain.DocPurchaseOrder
-	if _, err := s.PutTemplate(ctx, wrongType); err == nil {
+	if _, err := s.PutTemplate(ctx, wrongType, 0, ""); err == nil {
 		t.Fatal("the document type of a template changed")
 	}
 	if none, err := s.DefaultTemplate(ctx, domain.DocPackingSlip); err != nil || none != nil {

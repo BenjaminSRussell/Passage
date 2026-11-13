@@ -48,6 +48,12 @@ func (f *fakeStore) OpenAndon(context.Context, string) ([]store.Andon, error) {
 	return []store.Andon{}, nil
 }
 
+func (f *fakeStore) GetAndonSettings(context.Context) (store.AndonSettingsView, error) {
+	return store.AndonSettingsView{AndonSettings: domain.DefaultAndonSettings(), Default: true}, nil
+}
+func (f *fakeStore) PutAndonSettings(_ context.Context, set domain.AndonSettings, by string) (store.AndonSettingsView, error) {
+	return store.AndonSettingsView{AndonSettings: set, UpdatedBy: by}, nil
+}
 func (f *fakeStore) SweepAndon(context.Context, time.Time) (store.AndonSweepResult, error) {
 	return store.AndonSweepResult{}, nil
 }

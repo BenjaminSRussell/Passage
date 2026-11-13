@@ -1463,7 +1463,11 @@ export interface Instruction {
   value?: number;
   node?: string;
   materials?: InstructionMaterial[];
+  /** What a signature-request step's signature means; a step without one is signed as performed. */
+  meaning?: SignatureMeaning;
 }
+
+export type SignatureMeaning = "performed" | "verified" | "reviewed" | "approved";
 
 export interface RecipePhase {
   name: string;

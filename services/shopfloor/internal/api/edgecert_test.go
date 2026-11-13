@@ -9,7 +9,23 @@ import (
 
 type nodeTenants map[string]string
 
-func (n nodeTenants) EdgeNodeTenant(_ context.Context, id string) (string, error) { return n[id], nil }
+func (n nodeTenants) EdgeNodeTenant(_ context.Context, id, hash string) (string, error) {
+	if hash == "revoked" {
+		return "", nil
+	}
+	return n[id], nil
+}
+
+func TestEdgeCertIdentityRefusesARevokedCertificate(t *testing.T) {
+	nodes := nodeTenants{certNode: certTenant}
+	h := seen(t, `By=spiffe://cluster/envoy;Hash=REVOKED;Subject="CN=edge:`+certNode+`"`, nil, nodes)
+	if h.Get("X-Passage-Tenant") != "" || h.Get("X-Passage-User") != "" {
+		t.Fatalf("a revoked certificate got an identity: %v", h)
+	}
+	if got := certHash(`Hash=AbC;Subject="CN=x"`); got != "abc" {
+		t.Fatalf("hash %q", got)
+	}
+}
 
 const (
 	certNode   = "0195f0a0-0000-7000-8000-0000000000a1"

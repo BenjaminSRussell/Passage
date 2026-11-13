@@ -894,6 +894,58 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/andon-settings:
+    get:
+      operationId: getAndonSettings
+      summary: The tenant's andon thresholds (FR-25.11)
+      description: The defaults (10 minutes down, 5 minutes clear, 5 % scrap over 10 pieces) until the tenant sets its own; `default` says which.
+      x-passage-duty: shopfloor.view
+      responses:
+        "200":
+          description: The thresholds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AndonSettings"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: putAndonSettings
+      summary: Set the tenant's andon thresholds (FR-25.11)
+      description: |
+        Minutes a machine may stay down before the downtime alert (1 to 240), minutes a condition must stay clear before
+        an alert closes (0 to 120), and the scrap share (1 to 100 %) of an OEE bucket of at least `scrapMinCount` pieces
+        above which the scrap-rate alert is raised. The next machine event ingest and andon sweep use them.
+      x-passage-duty: shopfloor.setup.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [downtimeMinutes, clearMinutes, scrapPercent, scrapMinCount]
+              properties:
+                downtimeMinutes: { type: integer, minimum: 1, maximum: 240 }
+                clearMinutes: { type: integer, minimum: 0, maximum: 120 }
+                scrapPercent: { type: integer, minimum: 1, maximum: 100 }
+                scrapMinCount: { type: integer, minimum: 1, maximum: 100000 }
+      responses:
+        "200":
+          description: The thresholds as set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AndonSettings"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/andon/{id}:clear:
     post:
       operationId: clearAndon
@@ -1227,7 +1279,11 @@ paths:
       operationId: createProcessMessage
       summary: Record a process message (FR-25.17, BR-25.13)
       description: |
-        From a kiosk PI sheet, the edge connector or manual entry. The category (the tenant's
+        From a kiosk PI sheet, the edge connector or manual entry. A message that carries a signature (a
+        `signed-by` or `signature-meaning` value) must name the step it signs in its sourceMessageId
+        (`<control recipe id>:<unit procedure>/<operation>/<phase>/<seq>`), a signature-request step of a recipe
+        of the message's order: the meaning is that step's (performed by default) and is added when missing; another
+        meaning, or no such step, is SF-0186 (422). The category (the tenant's
         master row of that code, else the built-in default) decides the destinations; a code that
         is neither is SF-0164 and an inactive row SF-0165. The category's characteristic
         definitions govern the unit and limits of the values they name; a different type or a
@@ -3029,8 +3085,10 @@ paths:
         setpoint write it made (`written` true, with the value read back) or refused (`written` false, with the
         reason). A write must be a setpoint of the recipe at its value (SF-0178, 422) and is accepted only while the
         recipe is in-execution (SF-0175, 409; BR-25.15). Each write is stored in the write audit; a missing readback
-        or one differing by more than 0.001 is a deviation and publishes
-        `dev.passage.shopfloor.controlrecipe.deviation.v1`. Only the bound connector may report (SF-0154).
+        or one differing by more than the tolerance of the node's type is a deviation and publishes
+        `dev.passage.shopfloor.controlrecipe.deviation.v1`. The tolerance follows `nodeType`: a Double node (or an
+        unknown type) 0.001, a Float node also the rounding of a 32-bit float (2^-23 of the value), an integer or
+        Boolean node exact. Only the bound connector may report (SF-0154).
       x-passage-duty: shopfloor.edge.connect
       parameters:
         - $ref: "#/components/parameters/EdgeId"
@@ -3135,6 +3193,74 @@ paths:
         "422":
           $ref: "#/components/responses/Problem"
         "503":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}/certificates:
+    get:
+      operationId: listEdgeCertificates
+      summary: The certificate history of an edge node, newest first (FR-25.19)
+      description: Every certificate issued at enrollment or renewal, which one is current, its fingerprint, and who revoked it and why.
+      x-passage-duty: shopfloor.view
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+      responses:
+        "200":
+          description: The certificates.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EdgeCertificateRecord"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/edge-nodes/{id}/certificates/{serial}:revoke:
+    post:
+      operationId: revokeEdgeCertificate
+      summary: Revoke one certificate of an edge node
+      description: |
+        The gateway forwards each client certificate's SHA-256 as its Hash, and a connector gets its identity only for a
+        hash that is the fingerprint of a certificate issued to that node and not revoked (no hash, no identity). A
+        certificate issued before fingerprints were kept is accepted only until the node has a fingerprinted one, and
+        revoking one of those revokes all of them. Revoking the node's current certificate also unbinds the node
+        (connector subject, serial and expiry are cleared), so the connector has to enroll again with a new token. A new
+        enrollment revokes the node's earlier certificates by itself. Revoking a revoked certificate changes nothing; an unknown serial is SF-0185 (404).
+      x-passage-duty: shopfloor.edge.configure
+      parameters:
+        - $ref: "#/components/parameters/EdgeId"
+        - { name: serial, in: path, required: true, schema: { type: string, maxLength: 200 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "200":
+          description: The certificate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EdgeCertificateRecord"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
           $ref: "#/components/responses/Problem"
   /v1/shopfloor/edge-nodes/{id}:renew-certificate:
     post:
@@ -3730,6 +3856,32 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    AndonSettings:
+      type: object
+      required: [downtimeMinutes, clearMinutes, scrapPercent, scrapMinCount]
+      properties:
+        downtimeMinutes: { type: integer }
+        clearMinutes: { type: integer }
+        scrapPercent: { type: integer }
+        scrapMinCount: { type: integer }
+        default: { type: boolean }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    EdgeCertificateRecord:
+      type: object
+      required: [serial, subject, reason, notBefore, notAfter, issuedAt, current]
+      properties:
+        serial: { type: string }
+        subject: { type: string }
+        reason: { type: string, enum: [enroll, renew] }
+        notBefore: { type: string, format: date-time }
+        notAfter: { type: string, format: date-time }
+        issuedAt: { type: string, format: date-time }
+        fingerprint: { type: string, description: SHA-256 of the certificate, hex; absent for certificates issued before fingerprints were kept. }
+        current: { type: boolean }
+        revokedAt: { type: string, format: date-time }
+        revokedBy: { type: string }
+        revokeReason: { type: string }
     PISheetInput:
       type: object
       required: [name, recipe]
@@ -4525,6 +4677,10 @@ components:
         text: { type: string, maxLength: 4000 }
         node: { type: string, maxLength: 300, description: OPC-UA node id or topic of a setpoint or data request. }
         value: { type: number, description: The setpoint, scaled to the batch. }
+        meaning:
+          type: string
+          enum: [performed, verified, reviewed, approved]
+          description: What a signature-request step's signature means (21 CFR 11.50); the kiosk records it with the signature. Default performed; any other category refuses it.
         characteristic:
           type: object
           required: [name, type]
@@ -4603,6 +4759,7 @@ components:
               node: { type: string }
               value: { type: number }
               readback: { type: number }
+              nodeType: { type: string, enum: [Double, Float, Boolean, SByte, Byte, Int16, UInt16, Int32, UInt32, Int64, UInt64], description: The node's OPC-UA data type; left out when the protocol does not say. }
               written: { type: boolean }
               reason: { type: string }
               at: { type: string, format: date-time }

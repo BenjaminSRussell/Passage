@@ -236,6 +236,8 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "PRN-0014": { message: "A text block has a placeholder that the document gave no value for.", action: "Open Details to see which values are missing and send them with the document." },
   "PRN-0015": { message: "That output rule wasn't found.", action: "Reload the output rules to see the current list." },
   "PRN-0016": { message: "Document templates, text blocks and output rules aren't available right now.", action: "Try again in a few minutes. If it keeps failing, contact support with the details below." },
+  "PRN-0017": { message: "Someone else saved this document template after you opened it.", action: RELOAD_AND_REDO },
+  "PRN-0018": { message: "This document template already exists, so a save has to say which version it changes.", action: RELOAD_AND_REDO },
   "MOB-0112": { message: "No printer queue is set up for this document.", action: "Add a routing rule for the document type, or choose a queue." },
   "AP-OPN-001": { message: "A settled or reversed open item can't be held or released.", action: "Reload the page to see the item's current state." },
   "INV-OPB-001": { message: "Some opening stock rows can't be loaded, so nothing was loaded.", action: "Fix the rows listed and send the batch again." },
@@ -1056,6 +1058,8 @@ const shared: Record<string, ProblemCatalogEntry> = {
   "SF-0182": { message: "Someone else changed this PI sheet after you opened it.", action: RELOAD_AND_REDO },
   "SF-0183": { message: "A PI sheet with this code exists, or the sheet already has a draft in progress.", action: "Open the existing sheet or its draft, or use another code." },
   "SF-0184": { message: "A control recipe can only be made from a released PI sheet whose steps fit where the recipe goes.", action: "Release the sheet, or give each setpoint the node it is written to when the recipe goes to a process control system." },
+  "SF-0185": { message: "That certificate wasn't issued to this edge node.", action: "Reload the node's certificate history and pick a certificate from it." },
+  "SF-0186": { message: "This signature doesn't match the step it signs: the step asks for a different signature meaning, or it isn't a signature step of this batch.", action: "Reload the PI sheet on the kiosk and sign the step again." },
 };
 
 const companySetup: Record<string, ProblemCatalogEntry> = {
@@ -1153,6 +1157,10 @@ const processManufacturing: Record<string, ProblemCatalogEntry> = {
   "PMF-0506": {
     message: "This batch order can't be rescaled: its control recipe is already on the shop floor with the current quantities, and a recipe can't be replaced once it is sent.",
     action: "Keep the current batch size. To make a different quantity, create another batch order for the difference.",
+  },
+  "PMF-0507": {
+    message: "The potency of this batch order's ingredients can't change now: its control recipe is made or being made.",
+    action: "Set potency before you release the order. If making the recipe failed, change it and send the recipe again; otherwise charge the batch as the recipe says.",
   },
 };
 

@@ -1794,3 +1794,20 @@ export async function replenishTrucks(legalEntityId: string, truck?: { siteId: s
   const { body } = await send<{ orders?: TransferOrder[] }>("/truck-stock:replenish", { method: "POST", body: JSON.stringify(input) });
   return body.orders ?? [];
 }
+
+/** The levels of one truck as the form sends them: every product the truck carries, with its minimum and maximum. */
+export interface TruckLevelsInput {
+  legalEntityId: string;
+  siteId: string;
+  warehouseId: string;
+  /** Codes of the site and warehouse the truck is refilled from. */
+  sourceSiteId: string;
+  sourceWarehouseId: string;
+  levels: { productId: string; unit: string; minQty: string; maxQty: string }[];
+}
+
+/** Replaces the levels of one truck (FR-45.9); products not listed are removed. Returns the truck's levels as stored. */
+export async function setTruckStockLevels(input: TruckLevelsInput): Promise<TruckStockLevel[]> {
+  const { body } = await send<{ items?: TruckStockLevel[] }>("/truck-stock-levels", { method: "PUT", body: JSON.stringify(input) });
+  return body.items ?? [];
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -75,6 +77,7 @@ func (a *API) registerDocgen(r chi.Router) {
 	r.With(admin).Put("/document-templates/{code}", a.putTemplate)
 	r.With(read).Get("/document-templates", a.listTemplates)
 	r.With(read).Get("/document-templates/{code}", a.getTemplate)
+	r.With(read).Get("/document-templates/{code}/versions", a.listTemplateVersions)
 	r.With(admin).Put("/text-blocks/{code}/{language}", a.putTextBlock)
 	r.With(read).Get("/text-blocks", a.listTextBlocks)
 	r.With(admin).Post("/output-rules", a.createOutputRule)
@@ -116,6 +119,11 @@ func (a *API) putTemplate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	match, ok := templateIfMatch(r)
+	if !ok {
+		validationFailed(w, r, map[string]string{"If-Match": `must be the template version as an entity tag, for example "3"`})
+		return
+	}
 	var req templateRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
@@ -136,12 +144,45 @@ func (a *API) putTemplate(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, problems)
 		return
 	}
-	out, err := a.docs.PutTemplate(ctx, in)
+	p, _ := tenant.FromContext(ctx)
+	out, err := a.docs.PutTemplate(ctx, in, match, p.UserID)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", templateETag(out.Version))
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+func templateETag(version int) string { return `"` + strconv.Itoa(version) + `"` }
+
+// templateIfMatch reads If-Match as a template version; 0 when the header is absent (an unconditional save).
+func templateIfMatch(r *http.Request) (int, bool) {
+	raw := strings.TrimSpace(r.Header.Get("If-Match"))
+	if raw == "" {
+		return 0, true
+	}
+	if !strings.HasPrefix(raw, `"`) || !strings.HasSuffix(raw, `"`) || len(raw) < 3 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(raw[1 : len(raw)-1])
+	return n, err == nil && n >= 1
+}
+
+// listTemplateVersions is the version history of a template, newest first: what each save held, who saved it, when.
+func (a *API) listTemplateVersions(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := a.docgenStore(w, r)
+	if !ok {
+		return
+	}
+	items, err := a.docs.ListTemplateVersions(ctx, chi.URLParam(r, "code"))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, struct {
+		Items []domain.TemplateVersion `json:"items"`
+	}{Items: items})
 }
 
 func (a *API) getTemplate(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +195,7 @@ func (a *API) getTemplate(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", templateETag(out.Version))
 	httpx.JSON(w, http.StatusOK, out)
 }
 
