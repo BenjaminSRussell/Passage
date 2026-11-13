@@ -4,7 +4,7 @@
     Build-ServiceBundles.ps1 -Arch x64|arm64 -Repo $env:GITHUB_WORKSPACE
   Inputs from the environment: NODE_DIR and PYTHON_DIR (unset means the feature is not built and nothing is bundled for it).
 
-  Node (NODE_DIR\apps\<service>): each service is built with its own lockfile (npm ci, npm run build), then its production
+  Node (NODE_DIR\apps\<service>): each service is built with its own lockfile (npm ci, then tsc -p tsconfig.build.json), then its production
   dependencies are installed next to dist\ with npm ci --omit=dev. The layout is the one features\node.yaml names:
     apps\workflow-ts\dist\worker.js     (x64 only: @temporalio/core-bridge has no Windows arm64 native module)
     apps\agents-ts\dist\main.js, apps\agents-ts\migrations
@@ -38,7 +38,9 @@ if ($env:NODE_DIR) {
         Push-Location $src
         try {
             Invoke-Checked "$svc npm ci" { npm ci --no-audit --no-fund }
-            Invoke-Checked "$svc build" { npm run build }
+            # Not `npm run build`: that script is `rm -rf dist && tsc ...`, and npm runs scripts through cmd.exe on Windows, which has no rm.
+            if (Test-Path 'dist') { Remove-Item -Recurse -Force 'dist' }
+            Invoke-Checked "$svc build" { npx tsc -p tsconfig.build.json }
         } finally { Pop-Location }
         if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
