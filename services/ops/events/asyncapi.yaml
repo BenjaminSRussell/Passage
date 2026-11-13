@@ -1,0 +1,119 @@
+asyncapi: 3.0.0
+info:
+  title: ops
+  version: 0.3.0
+  description: >
+    Events of the ops control plane (PSG-50). Each is a CloudEvents envelope written to the ops outbox in the transaction of the change
+    it reports and relayed by Debezium. The platform-wide events (failover completed, SLO breached) carry the operator tenant as tenantid;
+    tenant.provisioned and license.changed carry the tenant they describe.
+channels:
+  passage.ops.failover:
+    address: passage.ops.failover
+    messages:
+      completed:
+        $ref: '#/components/messages/failoverCompleted'
+  passage.ops.tenant:
+    address: passage.ops.tenant
+    messages:
+      provisioned:
+        $ref: '#/components/messages/tenantProvisioned'
+  passage.ops.slo:
+    address: passage.ops.slo
+    messages:
+      breached:
+        $ref: '#/components/messages/sloBreached'
+  passage.ops.license:
+    address: passage.ops.license
+    messages:
+      changed:
+        $ref: '#/components/messages/licenseChanged'
+operations:
+  onFailoverCompleted:
+    action: send
+    summary: Every step of a failover's plan is DONE (written once, with the last step).
+    channel: { $ref: '#/channels/passage.ops.failover' }
+    messages:
+      - $ref: '#/channels/passage.ops.failover/messages/completed'
+  onTenantProvisioned:
+    action: send
+    summary: The last provisioning step of a tenant is DONE.
+    channel: { $ref: '#/channels/passage.ops.tenant' }
+    messages:
+      - $ref: '#/channels/passage.ops.tenant/messages/provisioned'
+  onSloBreached:
+    action: send
+    summary: The hourly SLO check found a service newly breached (once per breach, again only after it recovered).
+    channel: { $ref: '#/channels/passage.ops.slo' }
+    messages:
+      - $ref: '#/channels/passage.ops.slo/messages/breached'
+  onLicenseChanged:
+    action: send
+    summary: A licence was installed, or the hourly licence check found its state moved.
+    channel: { $ref: '#/channels/passage.ops.license' }
+    messages:
+      - $ref: '#/channels/passage.ops.license/messages/changed'
+components:
+  messages:
+    failoverCompleted:
+      name: dev.passage.ops.failover.completed.v1
+      title: Failover completed
+      summary: A recorded failover ran every step of its plan. Subject and aggregate are the failover event id.
+      payload:
+        type: object
+        required: [eventId, from, to, acceptDataLoss, lagSeconds, steps, completedAt]
+        properties:
+          eventId: { type: string }
+          from: { type: string, description: The region fenced. }
+          to: { type: string, description: The region promoted. }
+          acceptDataLoss: { type: boolean }
+          lagSeconds: { type: integer }
+          steps: { type: integer }
+          completedAt: { type: string, format: date-time }
+    tenantProvisioned:
+      name: dev.passage.ops.tenant.provisioned.v1
+      title: Tenant provisioned
+      summary: Step 7 of docs/ops/tenant-provisioning.md. Subject and tenantid are the new tenant.
+      payload:
+        type: object
+        required: [tenantId, name, residency, region, tier, realm, provisionedAt]
+        properties:
+          tenantId: { type: string, format: uuid }
+          name: { type: string }
+          residency: { type: string }
+          region: { type: string }
+          tier: { type: string, enum: [PROD, DEV, TEST, UAT] }
+          realm: { type: string }
+          provisionedAt: { type: string, format: date-time }
+    sloBreached:
+      name: dev.passage.ops.slo.breached.v1
+      title: SLO breached
+      summary: A service's availability or p95 latency over the last hour missed its target. Subject is the service (scrape job).
+      payload:
+        type: object
+        required: [service, window, availabilityTarget, latencyTargetMs, breachedAt]
+        properties:
+          service: { type: string }
+          window: { type: string }
+          availability: { type: number, nullable: true }
+          availabilityTarget: { type: number }
+          latencyP95Ms: { type: number, nullable: true }
+          latencyTargetMs: { type: number }
+          breachedAt: { type: string, format: date-time }
+    licenseChanged:
+      name: dev.passage.ops.license.changed.v1
+      title: Licence changed
+      summary: A licence was installed (reason installed) or its evaluated state moved (reason state_changed). Subject and tenantid are the licensee.
+      payload:
+        type: object
+        required: [tenantId, reason, state, expiresAt, daysToExpiry, fullUsers, activeFull, codes, version]
+        properties:
+          tenantId: { type: string, format: uuid }
+          reason: { type: string, enum: [installed, state_changed] }
+          state: { type: string, enum: [VALID, GRACE, EXPIRED] }
+          previousState: { type: string }
+          expiresAt: { type: string, format: date }
+          daysToExpiry: { type: integer }
+          fullUsers: { type: integer }
+          activeFull: { type: integer }
+          codes: { type: array, items: { type: string } }
+          version: { type: integer }

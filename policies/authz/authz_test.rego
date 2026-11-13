@@ -43,10 +43,20 @@ ops_operator_routes := [
 	["ops.region.view", "GET", "/v1/ops/failovers/evt-1/scorecard"],
 	["ops.region.view", "GET", "/v1/ops/tenants/t1/license"],
 	["ops.license.install", "PUT", "/v1/ops/tenants/t1/license"],
+	["ops.region.view", "GET", "/v1/ops/slo"],
+	["ops.region.view", "GET", "/v1/ops/tenants"],
+	["ops.region.view", "GET", "/v1/ops/tenants/t1"],
+	["ops.region.view", "GET", "/v1/ops/tenants/t1/costs/2026-10"],
+	["ops.region.view", "GET", "/v1/ops/costs"],
+	["ops.region.view", "GET", "/v1/ops/licenses"],
+	["ops.tenant.provision", "POST", "/v1/ops/tenants"],
+	["ops.tenant.provision", "PUT", "/v1/ops/tenants/t1/provision-steps/realm"],
+	["ops.cost.record", "PUT", "/v1/ops/tenants/t1/costs/2026-10"],
+	["ops.license.report", "PUT", "/v1/ops/tenants/t1/license/usage"],
 ]
 
 test_operator_only_duties_are_the_ops_duties if {
-	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute", "ops.breakglass.request", "ops.breakglass.review", "ops.license.install"}
+	{d | some d, spec in data.duties; spec.operator_only == true} == {"ops.region.view", "ops.region.report", "ops.failover.execute", "ops.breakglass.request", "ops.breakglass.review", "ops.license.install", "ops.tenant.provision", "ops.cost.record", "ops.license.report"}
 }
 
 test_operator_only_duties_grant_in_the_operator_tenant if {

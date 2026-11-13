@@ -271,8 +271,9 @@ paths:
       operationId: getTenantLicense
       summary: Read a tenant licence and its state
       description: >
-        VALID, GRACE or EXPIRED by the rules of BR-50.8 (grace 30 days by default, 0 to 60). The ops service does not hold the tenant's user counts:
-        activeFull is the caller's count of active full users; without it only the date rules apply. Admin sign-in and data export are never blocked.
+        VALID, GRACE or EXPIRED by the rules of BR-50.8 (grace 30 days by default, 0 to 60). activeFull is the caller's count of active full users;
+        without it the tenant's last reported count (PUT .../license/usage) applies, and without that only the date rules apply. Admin sign-in and data
+        export are never blocked.
       x-passage-duty: ops.region.view
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -281,6 +282,166 @@ paths:
         '200':
           description: The licence, its version, state and catalogue messages.
           content: { application/json: { schema: { $ref: '#/components/schemas/LicenseView' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/tenants/{id}/license/usage:
+    put:
+      operationId: reportTenantLicenseUsage
+      summary: Report a tenant's active user counts
+      description: >
+        The user-count reporter sends each tenant's active full, operational and self-service users, hourly. The hourly licence check
+        evaluates every licence with the last full-user count and writes dev.passage.ops.license.changed.v1 when the state moves.
+      x-passage-duty: ops.license.report
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LicenseUsageReport' } } }
+      responses:
+        '200':
+          description: The stored counts with the last checked state.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LicenseUsage' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/licenses:
+    get:
+      operationId: listTenantLicenses
+      summary: List every tenant licence with its state
+      description: Each installed licence with its state today, evaluated with the tenant's last reported full users, and those counts.
+      x-passage-duty: ops.region.view
+      responses:
+        '200':
+          description: The licences.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LicenseList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/slo:
+    get:
+      operationId: getSloReport
+      summary: SLO report per service
+      description: >
+        Availability (share of requests that were not 5xx) and p95 latency per service over the window, read from Prometheus
+        (http_requests_total and http_request_duration_seconds, one scrape job per service), against the targets SLO_AVAILABILITY_TARGET
+        (0.999) and SLO_LATENCY_P95_MS (2000, per service in SLO_LATENCY_P95_BY). breachedSince comes from the hourly SLO check, which writes
+        dev.passage.ops.slo.breached.v1 once per breach. 503 OPS-1725 when PROMETHEUS_URL is not set or Prometheus does not answer.
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: window, in: query, required: false, schema: { type: string, enum: ['1h', '6h', '24h', '7d', '30d'], default: '24h' } }
+      responses:
+        '200':
+          description: One line per service.
+          content: { application/json: { schema: { $ref: '#/components/schemas/SloReport' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/tenants:
+    get:
+      operationId: listTenantProvisions
+      summary: List tenant provisions
+      description: The provisions, newest first (at most 500), each with its status and whether it runs past the 15-minute target.
+      x-passage-duty: ops.region.view
+      responses:
+        '200':
+          description: The provisions.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ProvisionList' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: provisionTenant
+      summary: Provision a tenant
+      description: >
+        Checks the residency first (OPS-1705: the region must be deployed and inside the residency, by platform/go/residency), then records
+        the provision with its plan (realm, databases, kafka-acls, lakehouse, license). The provisioning runner executes each step and
+        reports it; the last DONE step writes dev.passage.ops.tenant.provisioned.v1. Idempotency-Key is required: a replay with the same
+        request answers 200 with the first record, a different request or a tenant that already has a provision answers 409 OPS-1723.
+      x-passage-duty: ops.tenant.provision
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 200 } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProvisionRequest' } } }
+      responses:
+        '201':
+          description: The provision was recorded.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Provision' } } }
+        '200':
+          description: A replay of the same request; the first record.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Provision' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/tenants/{id}:
+    get:
+      operationId: getTenantProvision
+      summary: Read a tenant provision with its steps
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The provision and the steps reported so far.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Provision' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/tenants/{id}/provision-steps/{action}:
+    put:
+      operationId: recordTenantProvisionStep
+      summary: Report one provisioning step
+      description: >
+        DONE is kept; FAILED marks the provision FAILED until a retry of that step is DONE. The license step is DONE only once the tenant's
+        signed licence is installed (OPS-1724). When the last step turns DONE the provision is PROVISIONED and the event is written in the same
+        transaction.
+      x-passage-duty: ops.tenant.provision
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: action, in: path, required: true, schema: { type: string, enum: [realm, databases, kafka-acls, lakehouse, license] } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProvisionStepReport' } } }
+      responses:
+        '200':
+          description: The provision after the step.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Provision' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/tenants/{id}/costs/{month}:
+    put:
+      operationId: recordTenantCost
+      summary: Record a tenant's metered month
+      description: >
+        The monthly metering job sends the six metered quantities (decimal strings), the ECB month-average rate (USD per EUR) and the
+        Prometheus query version; the statement is computed by the rules of docs/ops/cost-model.md (one rounding to cents, EUR from the
+        unrounded total) and stored. A second call restates the month. 503 COST-1904 without OPS_COST_RATES; 422 COST-1902 for invalid input.
+      x-passage-duty: ops.cost.record
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: month, in: path, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CostRecordRequest' } } }
+      responses:
+        '200':
+          description: The stored statement.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CostStatement' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: getTenantCost
+      summary: Read a tenant's cost statement
+      description: JSON, or the CSV statement with format=csv (or Accept text/csv). 404 COST-1903 when the month is not recorded.
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: month, in: path, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+        - { name: format, in: query, required: false, schema: { type: string, enum: [json, csv] } }
+      responses:
+        '200':
+          description: The statement.
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/CostStatement' } }
+            text/csv: { schema: { type: string } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/ops/costs:
+    get:
+      operationId: listTenantCosts
+      summary: List every tenant's cost statement for a month
+      description: The statements and the cluster total in USD, the figure reconciled with the provider invoice (AC-50.7).
+      x-passage-duty: ops.region.view
+      parameters:
+        - { name: month, in: query, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        '200':
+          description: The statements of the month.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CostList' } } }
         default: { $ref: '#/components/responses/Problem' }
   /healthz/region:
     get:
@@ -533,6 +694,132 @@ components:
       type: object
       required: [type, title, status]
       properties: { type: { type: string }, title: { type: string }, status: { type: integer }, detail: { type: string }, instance: { type: string }, code: { type: string }, traceId: { type: string }, errors: { type: object, additionalProperties: { type: string } } }
+    LicenseUsageReport:
+      type: object
+      required: [activeFull, activeOperational, activeSelfservice]
+      properties:
+        activeFull: { type: integer, minimum: 0 }
+        activeOperational: { type: integer, minimum: 0 }
+        activeSelfservice: { type: integer, minimum: 0 }
+    LicenseUsage:
+      type: object
+      properties:
+        activeFull: { type: integer }
+        activeOperational: { type: integer }
+        activeSelfservice: { type: integer }
+        countedAt: { type: string, format: date-time }
+        reportedBy: { type: string }
+        lastState: { type: string, enum: [VALID, GRACE, EXPIRED] }
+        checkedAt: { type: string, format: date-time }
+    LicenseList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/LicenseView'
+              - type: object
+                properties:
+                  usage: { $ref: '#/components/schemas/LicenseUsage' }
+                  tenantName: { type: string, description: The name the tenant was provisioned with; empty when it was not provisioned through ops. }
+    SloLine:
+      type: object
+      properties:
+        service: { type: string, description: The Prometheus scrape job of the service. }
+        requests: { type: number }
+        availability: { type: number, nullable: true }
+        availabilityTarget: { type: number }
+        latencyP95Ms: { type: number, nullable: true }
+        latencyTargetMs: { type: number }
+        errorBudgetRemaining: { type: number, nullable: true, description: 1 is untouched, 0 spent, negative overspent. }
+        availabilityBreached: { type: boolean }
+        latencyBreached: { type: boolean }
+        breached: { type: boolean }
+        breachedSince: { type: string, format: date-time }
+        noTraffic: { type: boolean }
+    SloReport:
+      type: object
+      properties:
+        window: { type: string }
+        generatedAt: { type: string, format: date-time }
+        breached: { type: integer }
+        services: { type: array, items: { $ref: '#/components/schemas/SloLine' } }
+    ProvisionRequest:
+      type: object
+      required: [tenantId, name, residency, region]
+      properties:
+        tenantId: { type: string, format: uuid }
+        name: { type: string, maxLength: 200 }
+        residency: { type: string, description: 'A code of platform/go/residency (EU, UK, US, GLOBAL).' }
+        region: { type: string }
+        tier: { type: string, enum: [PROD, DEV, TEST, UAT], default: PROD }
+    ProvisionStepReport:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [DONE, FAILED] }
+        detail: { type: string, maxLength: 2000 }
+    Provision:
+      type: object
+      properties:
+        tenantId: { type: string, format: uuid }
+        name: { type: string }
+        residency: { type: string }
+        region: { type: string }
+        tier: { type: string }
+        status: { type: string, enum: [PROVISIONING, PROVISIONED, FAILED] }
+        plan: { type: array, items: { type: string } }
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              order: { type: integer }
+              action: { type: string }
+              status: { type: string, enum: [DONE, FAILED] }
+              detail: { type: string }
+              reportedBy: { type: string }
+              recordedAt: { type: string, format: date-time }
+        requestedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        provisionedAt: { type: string, format: date-time }
+        overdue: { type: boolean }
+    ProvisionList:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Provision' } }
+    CostRecordRequest:
+      type: object
+      required: [quantities, usdPerEur, modelVersion]
+      properties:
+        quantities:
+          type: object
+          description: cpu_core_hours, memory_gb_hours, storage_gb, kafka_gb, lakehouse_gb and ai_tokens as decimal strings, all required.
+          additionalProperties: { type: string }
+        usdPerEur: { type: string, description: ECB month-average rate, USD per 1 EUR. }
+        modelVersion: { type: string }
+    CostStatement:
+      type: object
+      properties:
+        tenantId: { type: string, format: uuid }
+        month: { type: string }
+        quantities: { type: object, additionalProperties: { type: string } }
+        lines: { type: object, additionalProperties: { type: string } }
+        costUsd: { type: string }
+        costEur: { type: string }
+        usdPerEur: { type: string }
+        fxSource: { type: string }
+        overhead: { type: string }
+        modelVersion: { type: string }
+        recordedBy: { type: string }
+        recordedAt: { type: string, format: date-time }
+    CostList:
+      type: object
+      properties:
+        month: { type: string }
+        clusterCostUsd: { type: string }
+        items: { type: array, items: { $ref: '#/components/schemas/CostStatement' } }
   responses:
     Problem:
       description: RFC 9457 problem details.

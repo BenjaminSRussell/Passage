@@ -76,12 +76,21 @@ func (s *Postgres) RecordStep(ctx context.Context, eventID string, st Step, repo
 			return Problem(&domain.Error{Code: domain.CodeApprovalRequired, Detail: "fencing a region that cannot be reached needs a failover a second operator approved (start it with --accept-data-loss)"})
 		}
 	}
-	_, err := s.pool.Exec(ctx, `insert into ops_failover_step (event_id, action, ord, region, status, detail, forced, started_at, finished_at, reported_by)
+	// The step and, when it is the last one DONE, the failover.completed event commit together.
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into ops_failover_step (event_id, action, ord, region, status, detail, forced, started_at, finished_at, reported_by)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		on conflict (event_id, action) do update set ord = excluded.ord, region = excluded.region, status = excluded.status,
 		  detail = excluded.detail, forced = excluded.forced, started_at = excluded.started_at, finished_at = excluded.finished_at, reported_by = excluded.reported_by
 		where ops_failover_step.status <> 'DONE'`,
-		eventID, st.Action, st.Order, st.Region, st.Status, st.Detail, st.Forced, st.StartedAt, st.FinishedAt, reportedBy)
+			eventID, st.Action, st.Order, st.Region, st.Status, st.Detail, st.Forced, st.StartedAt, st.FinishedAt, reportedBy); err != nil {
+			return err
+		}
+		if st.Status != "DONE" {
+			return nil
+		}
+		return s.completeFailover(ctx, tx, eventID, reportedBy)
+	})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {

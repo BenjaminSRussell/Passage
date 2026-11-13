@@ -387,8 +387,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 		go func() { defer close(worker); deprovisioner.Run(ctx) }()
 		defer func() { stop(); <-worker }()
 	}
+	// The shared HTTP series (http_requests_total, http_request_duration_seconds) are served on the admin address
+	// (ADMIN_ADDR, default :9090, /metrics only), like every other service (#50).
 	if bundle == nil {
-		return httpx.Serve(ctx, cfg.httpAddr, router)
+		return httpx.ServeWithMetrics(ctx, cfg.httpAddr, router)
 	}
 	bundleErr := make(chan error, 1)
 	go func() {
@@ -396,7 +398,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		bundleErr <- err
 		stop()
 	}()
-	serveErr := httpx.Serve(ctx, cfg.httpAddr, router)
+	serveErr := httpx.ServeWithMetrics(ctx, cfg.httpAddr, router)
 	stop()
 	return errors.Join(serveErr, <-bundleErr)
 }

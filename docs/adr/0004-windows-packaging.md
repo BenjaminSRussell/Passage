@@ -3,6 +3,9 @@
 **Status:** Proposed — 2026-11-11
 **Issues:** [#607](https://github.com/BenjaminSRussell/Passage/issues/607), related #599, #50, #213
 
+The #607 acceptance criteria name this record `0003-windows-packaging.md`; ADR-0003 was already taken by the setup checklist
+decision, so the Windows packaging decision is ADR-0004.
+
 ## Context
 
 Some on-premises customers (AX 2009 shops especially) run Windows Server and deploy software with Intune,

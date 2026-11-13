@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -85,6 +87,17 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 		cfg.LicensePublicKey = key
 	}
+	if err := part3Config(getenv, &cfg); err != nil {
+		return err
+	}
+	checkEvery := time.Hour
+	if v := getenv("OPS_CHECK_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < time.Minute {
+			return fmt.Errorf("OPS_CHECK_INTERVAL must be a duration of at least 1m, got %q", v)
+		}
+		checkEvery = d
+	}
 	seed, err := domain.ParseRegions(getenv("OPS_REGIONS"))
 	if err != nil {
 		return fmt.Errorf("OPS_REGIONS: %w", err)
@@ -114,7 +127,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		}
 		lagPolicy.StaleAfter = time.Duration(n) * time.Second
 	}
-	st := store.New(pool).WithLagPolicy(lagPolicy)
+	st := store.New(pool).WithLagPolicy(lagPolicy).WithOperator(operator)
 	if len(seed) > 0 {
 		if err := st.Seed(ctx, seed); err != nil {
 			return fmt.Errorf("seed regions: %w", err)
@@ -128,6 +141,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// The hourly licence check and, with PROMETHEUS_URL, the SLO check (slo.breached, license.changed).
+	go a.RunChecks(ctx, checkEvery)
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
@@ -139,4 +154,50 @@ func addr(getenv func(string) string, key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// part3Config reads the SLO, cost and licence-check settings.
+func part3Config(getenv func(string) string, cfg *api.Config) error {
+	if u := getenv("PROMETHEUS_URL"); u != "" {
+		parsed, err := url.Parse(u)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("PROMETHEUS_URL must be an http(s) URL, got %q", u)
+		}
+		cfg.SLOSource = api.PromSource{URL: u}
+	}
+	if v := getenv("SLO_AVAILABILITY_TARGET"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f <= 0 || f >= 1 {
+			return fmt.Errorf("SLO_AVAILABILITY_TARGET must be a fraction between 0 and 1 (0.999), got %q", v)
+		}
+		cfg.SLOTargets.Availability = f
+	}
+	if v := getenv("SLO_LATENCY_P95_MS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("SLO_LATENCY_P95_MS must be a positive number of milliseconds, got %q", v)
+		}
+		cfg.SLOTargets.LatencyP95 = time.Duration(n) * time.Millisecond
+	}
+	if v := getenv("SLO_LATENCY_P95_BY"); v != "" {
+		var by map[string]int
+		if err := json.Unmarshal([]byte(v), &by); err != nil {
+			return fmt.Errorf("SLO_LATENCY_P95_BY must be a JSON object of service to milliseconds: %w", err)
+		}
+		cfg.SLOTargets.LatencyP95By = map[string]time.Duration{}
+		for svc, ms := range by {
+			if ms <= 0 {
+				return fmt.Errorf("SLO_LATENCY_P95_BY: %s must be a positive number of milliseconds", svc)
+			}
+			cfg.SLOTargets.LatencyP95By[svc] = time.Duration(ms) * time.Millisecond
+		}
+	}
+	if v := getenv("OPS_COST_RATES"); v != "" {
+		rates, err := domain.ParseCostRates(v)
+		if err != nil {
+			return fmt.Errorf("OPS_COST_RATES: %w", err)
+		}
+		cfg.CostRates = &rates
+	}
+	return nil
 }

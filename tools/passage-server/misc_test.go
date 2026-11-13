@@ -132,3 +132,34 @@ func TestProvisionDatabases(t *testing.T) {
 		t.Fatalf("dbs=%v grants=%v", f.dbs, f.grants)
 	}
 }
+
+func TestServicesCommandListsResolvedChildrenWithoutDatabaseURLs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "conf.d"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join("..", "..", "deploy", "windows", "features", "python.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "conf.d", "python.yaml"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "installDir: " + filepath.ToSlash(dir) + "\npgDsn: postgres://owner:secret@db:5432/postgres\nfeatures:\n  python: true\nservices:\n  - name: ledger\n    exe: ledger.exe\n"
+	if err := os.WriteFile(filepath.Join(dir, "passage.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"PASSAGE_CONFIG": filepath.Join(dir, "passage.yaml"), "PASSAGE_DATA_DIR": dir}
+	var out, errb bytes.Buffer
+	if code := execute([]string{"services"}, &out, &errb, func(k string) string { return env[k] }); code != 0 {
+		t.Fatalf("code %d: %s", code, errb.String())
+	}
+	if strings.Contains(out.String(), "secret") {
+		t.Fatalf("services printed a database password: %s", out.String())
+	}
+	for _, want := range []string{`"name": "routing-py"`, `"readyPath": "/healthz"`, `"name": "ledger"`, `"readyPath": "/readyz"`, `"uvicorn"`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("services output lacks %s: %s", want, out.String())
+		}
+	}
+}

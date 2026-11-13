@@ -22,7 +22,25 @@ const PREFIX_FEATURES: readonly (readonly [string, string])[] = [
   ["/integration/interchanges", "edi"],
   ["/integration/partner-sla", "edi"],
   ["/integration/edi", "edi"],
+  // Optional features of a Windows install (passage-server, #607): the screens of services that run under a private runtime the
+  // installation may not have. The copilot and the agent kill switch talk to agents-ts and mcp-ts (Node); route plans and load
+  // plans need transport's optimizer, routing-py (Python).
+  ["/copilot", installFeatureKey("node")],
+  ["/transport/routes", installFeatureKey("python")],
+  ["/transport/load-plans", installFeatureKey("python")],
 ];
+
+/** The feature key of an optional install feature, kept apart from the tenant catalog's keys. */
+export function installFeatureKey(feature: string): string {
+  return `install:${feature}`;
+}
+
+/** Folds the installation's optional features into the tenant's feature state. Either may be unknown. */
+export function withInstallation(state: FeatureState, installation: Readonly<Record<string, boolean>> | undefined): FeatureState {
+  if (installation === undefined) return state;
+  const install = Object.fromEntries(Object.entries(installation).map(([k, on]) => [installFeatureKey(k), on]));
+  return { ...(state ?? {}), ...install };
+}
 
 export function featureForPath(path: string): string | undefined {
   let best: readonly [string, string] | undefined;

@@ -8,11 +8,16 @@ app) and runs as the `Passage` Windows service.
 passage-server serve      # run in the foreground (console) or, under the Service Control Manager, as the service
 passage-server migrate    # start every service once with MIGRATE_ON_START=true, wait until ready, stop
 passage-server doctor     # dependency checks; -json for machine output; exit 1 on any FAIL
+passage-server services   # the children serve would start (start command, ports, readiness path) as JSON
 passage-server version
 ```
 
 Configuration: `%ProgramData%\Passage\passage.yaml` (or `PASSAGE_CONFIG`, `PASSAGE_DATA_DIR` off Windows), `conf.d\*.yaml`, then registry
 values (Windows). The property and key names are in [docs/ops/windows-install.md](../../docs/ops/windows-install.md).
+
+A `services:` entry (in `passage.yaml` or a `conf.d` file) takes `name`, `exe`, `args`, `env`, `route`, `feature`, `optional`, `noDb`,
+`disabled`, and for children that read no `HTTP_ADDR`: `{port}` / `{adminPort}` in `args` and `env` values, `singlePort: true` (API and
+readiness on one port) and `readyPath` (default `/readyz`). `{install}` and `{data}` expand everywhere.
 
 Build (Linux or Windows):
 

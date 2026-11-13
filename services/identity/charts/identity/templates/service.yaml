@@ -9,6 +9,7 @@ spec:
     app.kubernetes.io/name: identity
   ports:
     - { name: http, port: 8080, targetPort: http }
+    - { name: admin, port: 9090, targetPort: admin }
 {{- if .Values.bundle.enabled }}
 ---
 apiVersion: v1

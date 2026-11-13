@@ -1,0 +1,9 @@
+# The arm64 MSI installs this file as %ProgramData%\Passage\conf.d\node.yaml instead of node.yaml. The Temporal TypeScript SDK ships
+# no Windows arm64 native bridge (@temporalio/core-bridge has x86_64-pc-windows-msvc only), so workflow-ts is not bundled for arm64:
+# point an arm64 install at a workflow-ts worker that runs elsewhere (an x64 host or the Kubernetes deployment).
+services:
+  - name: agents-ts
+    exe: "{install}/runtime/node/node.exe"
+    args: ["{install}/runtime/node/apps/agents-ts/dist/main.js"]
+    feature: node
+    optional: true

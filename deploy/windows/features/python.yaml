@@ -1,14 +1,23 @@
 # Installed to %ProgramData%\Passage\conf.d\python.yaml by the "Python services" MSI feature (python.org embeddable distribution).
+# The packages and their dependencies are installed into runtime\python\Lib\site-packages by
+# deploy/windows/scripts/Build-ServiceBundles.ps1, and Test-ServiceBundles.ps1 starts each command below and waits for /healthz.
+# uvicorn reads no HTTP_ADDR: the port comes from {port}, and the service answers /healthz on that same port.
 services:
+  # The transport route optimizer (OR-Tools VRP); transport reaches it through TMS_OPTIMIZER_URL.
   - name: routing-py
     exe: "{install}/runtime/python/python.exe"
-    args: ["-m", "routing"]
+    args: ["-m", "uvicorn", "tms_optimizer.api:app", "--host", "127.0.0.1", "--port", "{port}"]
     feature: python
     optional: true
     noDb: true
+    singlePort: true
+    readyPath: /healthz
+  # The finite scheduling optimizer (CP-SAT).
   - name: scheduler-py
     exe: "{install}/runtime/python/python.exe"
-    args: ["-m", "scheduler"]
+    args: ["-m", "uvicorn", "scheduler_opt.app:create_app", "--factory", "--host", "127.0.0.1", "--port", "{port}"]
     feature: python
     optional: true
     noDb: true
+    singlePort: true
+    readyPath: /healthz

@@ -1,6 +1,10 @@
 # Tenant provisioning and decommission (FR-50.8, BR-50.9)
 
-## Provision: `POST /api/v1/ops/tenants` (platform.global.admin, `Idempotency-Key` required)
+## Provision: `POST /api/v1/ops/tenants` (`ops.tenant.provision`, `Idempotency-Key` required)
+
+Built in `services/ops` (#50 part 3): the residency check (step 1) and the plan, step tracking and event (step 7). The runner that
+performs steps 2 to 6 reports each with `PUT /api/v1/ops/tenants/{id}/provision-steps/{action}` (`realm`, `databases`, `kafka-acls`,
+`lakehouse`, `license`); see `services/ops/NOT-IMPLEMENTED.md` for what the runner still needs.
 Target: <= 15 min end to end (`provisioning.timeout_min`, default 15). Five concurrent provisions.
 
 Steps, each idempotent so a retry resumes:
