@@ -62,6 +62,24 @@ spec:
             - name: OPS_LICENSE_PUBLIC_KEY
               value: {{ .Values.licensePublicKey | quote }}
 {{- end }}
+{{- if .Values.prometheusUrl }}
+            - name: PROMETHEUS_URL
+              value: {{ .Values.prometheusUrl | quote }}
+{{- end }}
+            - name: SLO_AVAILABILITY_TARGET
+              value: {{ .Values.slo.availabilityTarget | quote }}
+            - name: SLO_LATENCY_P95_MS
+              value: {{ .Values.slo.latencyP95Ms | quote }}
+{{- if .Values.slo.latencyP95ByService }}
+            - name: SLO_LATENCY_P95_BY
+              value: {{ .Values.slo.latencyP95ByService | toJson | quote }}
+{{- end }}
+{{- if .Values.costRates }}
+            - name: OPS_COST_RATES
+              value: {{ .Values.costRates | toJson | quote }}
+{{- end }}
+            - name: OPS_CHECK_INTERVAL
+              value: {{ .Values.checkInterval | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

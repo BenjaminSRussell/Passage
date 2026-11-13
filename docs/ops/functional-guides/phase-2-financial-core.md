@@ -80,7 +80,8 @@ general ledger to the cent; a difference blocks the return.
 
 ## Wave 14: Period close, year-end and allocations
 
-Owning area: `services/close`. Screens: `apps/web/src/modules/close`.
+Owning area: `services/close`. Screens: none yet; period close runs through the close API (the coming-soon
+entry was removed from the navigation in #577).
 
 What you do here:
 

@@ -29,6 +29,10 @@ on:
       - 'platform/go/**'
       - 'services/*/cmd/**'
       - 'services/*/go.mod'
+      - 'services/workflow-ts/**'
+      - 'services/agents-ts/**'
+      - 'services/routing-py/**'
+      - 'services/scheduler-py/**'
       - '.github/workflows/windows-msi.yml'
   push:
     tags: ['v*']
@@ -109,6 +113,10 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
+      # The runner's Python builds the routing-py and scheduler-py wheels and installs them for the embeddable runtime.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
 
       - name: Version
         shell: pwsh
@@ -122,8 +130,11 @@ jobs:
           "VARIANT=${fips}${{ matrix.wixarch }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       # The web build is embedded into passage-server with go:embed (-tags webdist). It is not committed.
+      # VITE_PASSAGE_SERVER makes the web app read /installation.json and hide the screens of an MSI feature that is off (#607).
       - name: Build the web app
         working-directory: apps/web
+        env:
+          VITE_PASSAGE_SERVER: '1'
         run: |
           npm ci --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
@@ -161,6 +172,18 @@ jobs:
       - name: Optional runtimes and prerequisites (pinned, hash-verified)
         shell: pwsh
         run: .\deploy\windows\scripts\Fetch-Optional.ps1 -Arch ${{ matrix.wixarch }} -Temp $env:RUNNER_TEMP
+
+      # The TypeScript and Python services go into the private runtimes before WiX harvests them (features\node.yaml, python.yaml).
+      - name: Service bundles (Node and Python)
+        shell: pwsh
+        run: .\deploy\windows\scripts\Build-ServiceBundles.ps1 -Arch ${{ matrix.wixarch }} -Repo $env:GITHUB_WORKSPACE
+
+      # Starts each bundled service with the start command passage-server resolves from the conf.d files. The runner is x64, so the
+      # arm64 bundles are built but not started.
+      - name: Test the service start commands
+        if: matrix.wixarch == 'x64'
+        shell: pwsh
+        run: .\deploy\windows\scripts\Test-ServiceBundles.ps1 -ServerExe "$env:OUT\bin\passage-server.exe" -Repo $env:GITHUB_WORKSPACE -Temp $env:RUNNER_TEMP
 
       - name: Build the packages (unsigned)
         shell: pwsh
@@ -243,6 +266,16 @@ jobs:
       - name: Optional runtimes and prerequisites (pinned, hash-verified)
         shell: pwsh
         run: .\deploy\windows\scripts\Fetch-Optional.ps1 -Arch ${{ matrix.wixarch }} -Temp $env:RUNNER_TEMP
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      # The same bundles the build job built and tested, rebuilt into this job's freshly fetched runtimes.
+      - name: Service bundles (Node and Python)
+        shell: pwsh
+        run: .\deploy\windows\scripts\Build-ServiceBundles.ps1 -Arch ${{ matrix.wixarch }} -Repo $env:GITHUB_WORKSPACE
 
       # The secrets are mapped only onto the steps that sign.
       - name: Sign the executables (services, passage-server, Temporal)

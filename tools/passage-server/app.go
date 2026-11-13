@@ -78,7 +78,7 @@ func runServe(ctx context.Context, getenv func(string) string, log *slog.Logger)
 	if err != nil {
 		return err
 	}
-	handler := NewGateway(guard, upstreamsOf(procs), webFS(), sup.Health, secret)
+	handler := NewGateway(guard, upstreamsOf(procs), webFS(), sup.Health, secret, cfg.Features)
 	server := &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
 	// No WriteTimeout: the copilot answers over a long-lived stream.
 	if cfg.TLS.CertFile != "" {

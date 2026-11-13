@@ -51,6 +51,12 @@ networkPolicy:
   opaNamespaces: []
   opaPodLabels:
     passage.io/opa-sidecar: "true"
+  # Namespaces whose Prometheus pods may scrape the admin port (9090, /metrics only); empty admits no scraper.
+  metricsNamespaces: []
+  metricsPodLabels:
+    app.kubernetes.io/name: prometheus
+# A ServiceMonitor for the admin port (the shared HTTP series, #50).
+serviceMonitor: { enabled: false }
 replicaCount: 1
 resources:
   requests: { cpu: 50m, memory: 64Mi }

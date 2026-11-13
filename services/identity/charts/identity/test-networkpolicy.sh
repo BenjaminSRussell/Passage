@@ -55,6 +55,8 @@ assert_rules gateway-namespace-mode "$(ingress_rules <<<"$gateway_ns_render")" 8
 assert_rules same-namespace-opt-in "$(render --set networkPolicy.allowSameNamespace=true)" 8080 same-namespace
 assert_rules no-peers "$(render --set-json 'networkPolicy.gatewayNamespaces=[]')" 8080 closed
 assert_rules bundle "$(render --set bundle.enabled=true)" 8443 labelled
+assert_rules metrics-default "$(render)" 9090 closed
+assert_rules metrics-scrape "$(render --set-json 'networkPolicy.metricsNamespaces=["monitoring"]')" 9090 scoped
 
 if helm template identity "$chart_dir" --set bundle.enabled=true --set networkPolicy.opaPodLabels=null >/dev/null 2>&1; then
   echo "bundle.enabled with empty opaPodLabels must fail to render" >&2

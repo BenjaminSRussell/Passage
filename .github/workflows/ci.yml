@@ -27,6 +27,10 @@ on:
         type: boolean
         required: false
         default: false
+      workflow:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -361,6 +365,28 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  # Temporal worker (services/workflow-ts): typecheck, the event-schema compatibility gate and the workflow tests, which
+  # run every workflow (budget plan continue-as-new included) against the Temporal time-skipping test server that
+  # @temporalio/testing downloads, then the production build the Dockerfile and the Windows bundle use.
+  workflow:
+    name: workflow (services/workflow-ts)
+    if: inputs.workflow
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: services/workflow-ts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: services/workflow-ts/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
   py:
     name: py (${{ matrix.package }}, ortools=${{ matrix.ortools }})
     if: inputs.py
@@ -503,6 +529,18 @@ jobs:
           done
           docker logs keycloak-hipaa
           exit 1
+
+  # The docs and ops tools (#560): the OpenAPI gate over every service spec (a route without an entry fails), the AsyncAPI
+  # reference, the docs link check and the cost, licence and capacity calculators the ops service mirrors.
+  docs-tools:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml==6.0.2
+      - run: python -m unittest discover -s docs/ops/tools -p 'test_*.py'
 
   deploy-release:
     runs-on: ubuntu-24.04

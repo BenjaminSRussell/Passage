@@ -13,6 +13,18 @@ rtoTargetMinutes: 60
 rpoTargetSeconds: 300
 # Base64 Ed25519 public key of Passage commercial operations; tenant licences are installed only when signed with its key (LIC-1804).
 licensePublicKey: ""
+# Part 3. The SLO report and the hourly SLO check read Prometheus (empty: GET /v1/ops/slo answers 503 OPS-1725).
+prometheusUrl: ""
+slo:
+  availabilityTarget: "0.999"
+  latencyP95Ms: 2000
+  # Per-service p95 targets in milliseconds, by Prometheus scrape job: { ledger: 500 }
+  latencyP95ByService: {}
+# USD unit rates of the tenant cost statements (docs/ops/cost-model.md), as decimal strings; empty refuses to record (COST-1904):
+# { cpu_core_hours: "0.04", memory_gb_hours: "0.005", storage_gb: "0.10", kafka_gb: "0.02", lakehouse_gb: "0.023", ai_tokens: "0.000002", overhead: "0.12" }
+costRates: {}
+# How often the licence check and the SLO check run.
+checkInterval: 1h
 # The platform operator's tenant (identity's IDENTITY_OPERATOR_TENANT_ID). The ops routes serve this tenant only; the
 # service refuses to start without it.
 operatorTenantId: ""

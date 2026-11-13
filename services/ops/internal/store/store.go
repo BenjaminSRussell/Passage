@@ -83,12 +83,27 @@ type Store interface {
 	InstallLicense(ctx context.Context, l domain.License, payload, signature []byte, user string, ifMatch int64) (LicenseRecord, error)
 	License(ctx context.Context, tenantID string) (LicenseRecord, error)
 	Licenses(ctx context.Context) ([]LicenseRecord, error)
+	// Part 3: tenant provisioning, cost statements, licence user counts and the hourly check, SLO breach state.
+	CreateProvision(ctx context.Context, key string, req domain.ProvisionRequest, user string) (Provision, bool, error)
+	Provision(ctx context.Context, tenantID string) (Provision, error)
+	Provisions(ctx context.Context) ([]Provision, error)
+	RecordProvisionStep(ctx context.Context, tenantID, action, status, detail, user string) (Provision, error)
+	RecordCost(ctx context.Context, st domain.CostStatement, user string) (CostRecord, error)
+	Cost(ctx context.Context, tenantID, month string) (CostRecord, error)
+	Costs(ctx context.Context, month string) ([]CostRecord, string, error)
+	ReportLicenseUsage(ctx context.Context, tenantID string, u LicenseUsage, user string) (LicenseUsage, error)
+	LicenseUsage(ctx context.Context, tenantID string) (LicenseUsage, error)
+	CheckLicenses(ctx context.Context, now time.Time) (int, error)
+	RecordSLO(ctx context.Context, rep *domain.SLOReport) (int, error)
+	SLOStates(ctx context.Context) (map[string]time.Time, error)
 }
 
 // Postgres implements Store.
 type Postgres struct {
 	pool *pgxpool.Pool
 	lag  LagPolicy
+	// operator is the platform operator tenant: the tenant of the platform-wide events (WithOperator).
+	operator string
 }
 
 // New wraps pool.
@@ -111,10 +126,13 @@ func Problem(err error) error {
 	}
 	status := http.StatusConflict
 	switch rule.Code {
-	case domain.CodeRegionUnknown, domain.CodeRequestUnknown, domain.CodeBreakGlassUnknown, CodeLicenseNone:
+	case domain.CodeRegionUnknown, domain.CodeRequestUnknown, domain.CodeBreakGlassUnknown, CodeLicenseNone, domain.CodeProvisionUnknown, domain.CodeCostUnknown:
 		status = http.StatusNotFound
-	case domain.CodeBreakGlassInvalid, domain.CodeBreakGlassReview, domain.CodeLicenseSignature, domain.CodeLicenseInvalid:
+	case domain.CodeBreakGlassInvalid, domain.CodeBreakGlassReview, domain.CodeLicenseSignature, domain.CodeLicenseInvalid,
+		domain.CodeProvisionInvalid, domain.CodeProvisionLicense, domain.CodeResidency, domain.CodeCostInvalid, domain.CodeSLOInvalid:
 		status = http.StatusUnprocessableEntity
+	case domain.CodeCostUnavailable, domain.CodeSLOUnavailable:
+		status = http.StatusServiceUnavailable
 	case domain.CodeLicenseStale:
 		status = http.StatusPreconditionFailed
 	case domain.CodeLagExceeded, domain.CodeApprovalRequired:
