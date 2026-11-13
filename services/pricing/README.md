@@ -220,7 +220,7 @@ testdata/               fixtures
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/v1/pricing/resolve?explain=true` | pricing.view | up to `PRICING_MAX_LINES` (500) lines; the PRD's PricingResolve duty maps here until w27 |
+| POST | `/v1/pricing/resolve?explain=true` | pricing.view or sales.order.write (order entry prefills the unit price) | up to `PRICING_MAX_LINES` (500) lines; the PRD's PricingResolve duty maps here until w27 |
 | POST | `/v1/pricing/simulate?explain=true` | pricing.view | inline records (at most 1000), nothing stored |
 | POST | `/v1/pricing/compare?explain=true` | pricing.view | one request under two procedure versions of the request's legal entity (DRAFT included), with the differences; inline records at most 1000 |
 | GET | `/v1/pricing/price-list?legalEntityId=&customerId=&customerGroupId=&currency=&asOf=&type=&productId=&productGroupId=&limit=&offset=` | pricing.view | active records that apply to a customer on a date, paged: at most 1000 items a page (`limit` 1 to 1000), `total` matches, `truncated` and `nextOffset` when more follow; `productId` / `productGroupId` keep the records keyed to that product (or a variant) or group |

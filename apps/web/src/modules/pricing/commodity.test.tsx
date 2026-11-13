@@ -229,7 +229,7 @@ describe("Commodity price calculations", () => {
     expect(pageViolations(container)).toEqual([]);
     fill("Legal entity", LE);
     fill("Name", "Copper rod EA");
-    fill("Cost basis type id", BASIS);
+    fill("Cost basis type", BASIS);
     fill("Conversion factor", "0.0012");
     fill("Margin percentage", "10");
     fill("Decimals", "2");
@@ -261,7 +261,7 @@ describe("Commodity price calculations", () => {
     renderAt("/pricing/commodity/calculations/new");
     fill("Legal entity", LE);
     fill("Name", "Copper rod EA");
-    fill("Cost basis type id", BASIS);
+    fill("Cost basis type", BASIS);
     fill("Conversion factor", "0.0012");
     fill("Product", "ROD");
     fill("Unit", "EA");

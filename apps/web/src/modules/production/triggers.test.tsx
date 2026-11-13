@@ -1,5 +1,5 @@
 import { findTable } from "../../test-utils";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -268,12 +268,11 @@ describe("Trigger points on the order detail", () => {
     expect(calls(fetchMock).some(([url, init]) => url.endsWith("/trigger-points") && init?.method === "POST")).toBe(false);
 
     const first = within(form).getByRole("group", { name: "Trigger operation 1" });
-    await within(first).findByRole("option", { name: "CNC mill (CNC-1)" });
-    await userEvent.selectOptions(within(first).getByLabelText("Resource"), resource);
+    fireEvent.change(within(first).getByLabelText("Resource"), { target: { value: resource } });
     await userEvent.type(within(first).getByLabelText(/Run hours per unit/), "0.5");
     await userEvent.click(within(form).getByRole("button", { name: "Add operation" }));
     const second = within(form).getByRole("group", { name: "Trigger operation 2" });
-    await userEvent.selectOptions(within(second).getByLabelText("Resource"), uuid(302));
+    fireEvent.change(within(second).getByLabelText("Resource"), { target: { value: uuid(302) } });
     await userEvent.type(within(second).getByLabelText(/Setup hours/), "1");
     await userEvent.click(within(form).getByRole("button", { name: "Define trigger point" }));
 
@@ -356,8 +355,7 @@ describe("Trigger points on the order detail", () => {
     renderAt(`/production/${orderId}`);
     const form = await screen.findByRole("form", { name: "Define a trigger point" });
     await userEvent.selectOptions(within(form).getByLabelText("Then"), "create-rework-order");
-    await within(form).findByRole("option", { name: "CNC mill (CNC-1)" });
-    await userEvent.selectOptions(within(form).getByLabelText("Resource"), resource);
+    fireEvent.change(within(form).getByLabelText("Resource"), { target: { value: resource } });
     await userEvent.click(within(form).getByRole("button", { name: "Define trigger point" }));
     const alert = await screen.findByText(/needs the duty production.order.rework/);
     expect(alert.closest("[role=alert]")).toHaveTextContent("The trigger point change was refused");

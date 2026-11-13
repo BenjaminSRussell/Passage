@@ -43,9 +43,12 @@ type WriteReport struct {
 	Node      string
 	Value     float64
 	Readback  *float64
-	Written   bool
-	Reason    string
-	At        time.Time
+	// NodeType is the OPC-UA data type of the node (Double, Float, Int32, Boolean, ...), "" when the protocol does not
+	// say; the readback tolerance depends on it.
+	NodeType string
+	Written  bool
+	Reason   string
+	At       time.Time
 }
 
 // RecipeReport is the status and writes the connector reports for one recipe.
@@ -66,6 +69,12 @@ type RecipePlane interface {
 type Writer interface {
 	Write(ctx context.Context, node string, value float64) error
 	Read(ctx context.Context, node string) (float64, error)
+}
+
+// NodeTyper is implemented by a Writer that can tell the data type of a node (the OPC-UA adapter), so the readback
+// is compared with the tolerance of that type.
+type NodeTyper interface {
+	NodeType(ctx context.Context, node string) (string, error)
 }
 
 // RecipePublisher is implemented by a Writer whose destination also takes the recipe document itself: the
@@ -146,10 +155,6 @@ func (w *SimWriter) WriteLog() []string {
 	defer w.mu.Unlock()
 	return append([]string(nil), w.Writes...)
 }
-
-// readbackTolerance is the absolute difference between value written and read back that counts as equal.
-// The server applies the same figure when it decides a deviation.
-const readbackTolerance = 0.001
 
 // ExecuteRecipes pulls the node's recipes and works each: it acknowledges a sent recipe (received), starts
 // it (in-execution) and, once, writes its setpoints under BR-25.15 and reports the writes. A recipe for
@@ -235,7 +240,13 @@ func (r *Runtime) executeRecipe(ctx context.Context, rc Recipe) (bool, error) {
 				wr.Reason = "readback failed: " + err.Error()
 			} else {
 				wr.Readback = &back
-				if !domain.ReadbackMatches(sp.Value, back, readbackTolerance) {
+				if typer, ok := writer.(NodeTyper); ok {
+					if t, err := typer.NodeType(ctx, sp.Node); err == nil && domain.KnownNodeType(t) {
+						wr.NodeType = t
+					}
+				}
+				// The server decides the deviation with the same tolerance by node type (BR-25.15).
+				if !domain.ReadbackMatches(sp.Value, back, domain.ReadbackTolerance(wr.NodeType, sp.Value)) {
 					r.deviations.Add(1)
 					r.log.Warn("setpoint readback differs from the value written (BR-25.15)", "node", sp.Node, "written", sp.Value, "readback", back)
 				}
@@ -359,6 +370,7 @@ func (c *Client) ReportRecipe(ctx context.Context, id string, rep RecipeReport) 
 		Node      string   `json:"node"`
 		Value     float64  `json:"value"`
 		Readback  *float64 `json:"readback,omitempty"`
+		NodeType  string   `json:"nodeType,omitempty"`
 		Written   bool     `json:"written"`
 		Reason    string   `json:"reason,omitempty"`
 		At        string   `json:"at,omitempty"`
@@ -373,7 +385,7 @@ func (c *Client) ReportRecipe(ctx context.Context, id string, rep RecipeReport) 
 	if len(rep.Writes) > 0 {
 		writes := make([]wire, 0, len(rep.Writes))
 		for _, w := range rep.Writes {
-			writes = append(writes, wire{w.PhasePath, w.Node, w.Value, w.Readback, w.Written, w.Reason, w.At.UTC().Format(time.RFC3339Nano)})
+			writes = append(writes, wire{w.PhasePath, w.Node, w.Value, w.Readback, w.NodeType, w.Written, w.Reason, w.At.UTC().Format(time.RFC3339Nano)})
 		}
 		body["writes"] = writes
 	}

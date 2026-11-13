@@ -1,5 +1,6 @@
-// Server-side sessions: the browser holds only an opaque, HttpOnly cookie, never a token. In memory, so a restart signs
-// everyone out and a second replica would not know the first one's sessions (NOT-IMPLEMENTED.md: shared store).
+// Server-side sessions: the browser holds only an opaque, HttpOnly cookie, never a token. The store is behind an interface so the
+// pods of a replicated deployment can share it: MemorySessionStore is the development fallback (one pod, a restart signs everyone
+// out), RedisSessionStore keeps sessions in a Valkey or Redis server (see redisStore.ts and resp.ts).
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { SupplierIdentity } from "./oidc.ts";
@@ -10,9 +11,14 @@ export const ABSOLUTE_TIMEOUT_MS = 8 * 60 * 60 * 1000;
 export const LOGIN_TTL_MS = 10 * 60 * 1000;
 const MAX_SESSIONS = 10_000;
 
+/** Thrown by a store that cannot reach its backing server: the portal answers 503, it does not sign the user out. */
+export class StoreUnavailable extends Error {}
+
 export interface Session {
   id: string;
   identity: SupplierIdentity;
+  /** The ID token of the sign-in, kept server side only and never sent to the browser (the end-session request carries the client id instead). */
+  idToken: string;
   /** Double-submit token: the app reads it from /bff/me and sends it back on every non-GET request. */
   csrf: string;
   createdAt: number;
@@ -25,22 +31,43 @@ export interface PendingLogin {
   expiresAt: number;
 }
 
-export class SessionStore {
+/** Where sessions and pending sign-ins live. Every method may fail when the store is unreachable; the server answers 503 then. */
+export interface SessionStore {
+  create(identity: SupplierIdentity, idToken: string, now: number): Promise<Session>;
+  /** The live session of id (refreshing its idle clock), or undefined when unknown, idle too long or past its absolute lifetime. */
+  get(id: string | undefined, now: number): Promise<Session | undefined>;
+  delete(id: string): Promise<void>;
+  /** Ends every session of a Keycloak session id and/or user (back-channel logout); answers how many were ended. */
+  deleteByKeycloak(sid: string, sub: string): Promise<number>;
+  putLogin(state: string, login: PendingLogin): Promise<void>;
+  /** A state is used once: a replayed callback finds nothing. */
+  takeLogin(state: string, now: number): Promise<PendingLogin | undefined>;
+}
+
+export function newSession(identity: SupplierIdentity, idToken: string, now: number): Session {
+  return { id: randomBytes(32).toString("base64url"), identity, idToken, csrf: randomBytes(32).toString("base64url"), createdAt: now, lastSeenAt: now };
+}
+
+export function expired(s: Session, now: number): boolean {
+  return now - s.lastSeenAt > IDLE_TIMEOUT_MS || now - s.createdAt > ABSOLUTE_TIMEOUT_MS;
+}
+
+export class MemorySessionStore implements SessionStore {
   private sessions = new Map<string, Session>();
   private logins = new Map<string, PendingLogin>();
 
-  create(identity: SupplierIdentity, now: number): Session {
+  async create(identity: SupplierIdentity, idToken: string, now: number): Promise<Session> {
     if (this.sessions.size >= MAX_SESSIONS) this.sweep(now);
-    if (this.sessions.size >= MAX_SESSIONS) throw new Error("too many sessions");
-    const session: Session = { id: randomBytes(32).toString("base64url"), identity, csrf: randomBytes(32).toString("base64url"), createdAt: now, lastSeenAt: now };
+    if (this.sessions.size >= MAX_SESSIONS) throw new StoreUnavailable("too many sessions");
+    const session = newSession(identity, idToken, now);
     this.sessions.set(session.id, session);
     return session;
   }
 
-  get(id: string | undefined, now: number): Session | undefined {
+  async get(id: string | undefined, now: number): Promise<Session | undefined> {
     const s = id === undefined ? undefined : this.sessions.get(id);
     if (!s) return undefined;
-    if (now - s.lastSeenAt > IDLE_TIMEOUT_MS || now - s.createdAt > ABSOLUTE_TIMEOUT_MS) {
+    if (expired(s, now)) {
       this.sessions.delete(s.id);
       return undefined;
     }
@@ -48,18 +75,28 @@ export class SessionStore {
     return s;
   }
 
-  delete(id: string): void {
+  async delete(id: string): Promise<void> {
     this.sessions.delete(id);
   }
 
-  putLogin(state: string, login: PendingLogin): void {
+  async deleteByKeycloak(sid: string, sub: string): Promise<number> {
+    let n = 0;
+    for (const [id, s] of this.sessions) {
+      if ((sid !== "" && s.identity.sessionId === sid) || (sid === "" && sub !== "" && s.identity.userId === sub)) {
+        this.sessions.delete(id);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  async putLogin(state: string, login: PendingLogin): Promise<void> {
     if (this.logins.size >= MAX_SESSIONS) this.sweep(Date.now());
-    if (this.logins.size >= MAX_SESSIONS) throw new Error("too many pending sign-ins");
+    if (this.logins.size >= MAX_SESSIONS) throw new StoreUnavailable("too many pending sign-ins");
     this.logins.set(state, login);
   }
 
-  /** A state is used once: a replayed callback finds nothing. */
-  takeLogin(state: string, now: number): PendingLogin | undefined {
+  async takeLogin(state: string, now: number): Promise<PendingLogin | undefined> {
     const l = this.logins.get(state);
     this.logins.delete(state);
     return l && l.expiresAt >= now ? l : undefined;
@@ -70,7 +107,7 @@ export class SessionStore {
   }
 
   private sweep(now: number): void {
-    for (const [id, s] of this.sessions) if (now - s.lastSeenAt > IDLE_TIMEOUT_MS || now - s.createdAt > ABSOLUTE_TIMEOUT_MS) this.sessions.delete(id);
+    for (const [id, s] of this.sessions) if (expired(s, now)) this.sessions.delete(id);
     for (const [state, l] of this.logins) if (l.expiresAt < now) this.logins.delete(state);
   }
 }
@@ -91,7 +128,7 @@ export function sameToken(a: string | undefined, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-/** A fixed-window limiter per key (the session id), in memory per pod. */
+/** A fixed-window limiter per key (the session id), in memory per pod: with several pods the limit applies to each. */
 export class RateLimiter {
   private windows = new Map<string, { start: number; count: number }>();
   private readonly limit: number;

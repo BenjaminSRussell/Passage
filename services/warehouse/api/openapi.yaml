@@ -459,8 +459,8 @@ paths:
         "422": { $ref: "#/components/responses/Unprocessable" }
     get:
       operationId: listDockAppointments
-      summary: List a warehouse's appointments overlapping a window, earliest first (at most 500)
-      x-passage-duty: warehouse.inquiry.view
+      summary: List a warehouse's appointments overlapping a window, earliest first (at most 500); the gate guard reads them for check-in
+      x-passage-duty: warehouse.inquiry.view or transport.gate.operate
       parameters:
         - { name: warehouseId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: doorId, in: query, schema: { type: string, format: uuid } }
@@ -479,6 +479,22 @@ paths:
         "400": { $ref: "#/components/responses/Validation" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/warehouse/dock-appointments/{id}:
+    get:
+      operationId: getDockAppointment
+      summary: Read one dock appointment with its door code (the appointment lookup of the gate check-in)
+      x-passage-duty: warehouse.inquiry.view or transport.gate.operate
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The appointment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Appointment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/warehouse/receipts:from-asn:
     post:
       operationId: registerASNReceipt
@@ -733,10 +749,15 @@ paths:
       operationId: ingestRFIDReads
       summary: Post the reads of an RFID reader or portal (FR-32.9)
       description: >
-        Up to 500 reads. Each EPC (24 hexadecimal characters, 96 bits) is decoded: SGTIN-96, SSCC-96, SGLN-96,
-        GRAI-96, GIAI-96, GSRN-96 and GDTI-96. A read that cannot be decoded is listed in `rejected` with its position
-        (WMS-EPC-INVALID) and the rest are stored. A tag read again at the same reader within five seconds is counted
-        in `duplicates`. A tag that is an SSCC the warehouse labelled names its receipt and pallet.
+        Up to 500 reads. Each EPC is decoded: the 96-bit SGTIN, SSCC, SGLN, GRAI, GIAI, GSRN, GSRNP, GDTI and GID (24
+        hexadecimal characters), and SGTIN-198, SGLN-195, GRAI-170, GDTI-174 and GIAI-202 with their alphanumeric
+        serial (up to 52 characters, padded to a 16-bit word with zero bits). A read that cannot be decoded is listed in
+        `rejected` with its position (WMS-EPC-INVALID) and the rest are stored. A tag read again at the same reader
+        within five seconds is counted in `duplicates`. A tag that is an SSCC the warehouse labelled names its receipt
+        and pallet. A stored read then runs the rules of its reader (`/v1/warehouse/rfid-rules`): RECEIVE_PALLET
+        receives the expected ASN pallet with that SSCC at its announced quantity, CONFIRM_PUTAWAY confirms the open
+        put-away of that pallet bound for the rule's location. Each read lists what its rules did in `actions`
+        (DONE, SKIPPED or REFUSED with the reason); a refusal does not stop the batch.
       x-passage-duty: warehouse.rfid.ingest
       requestBody:
         required: true
@@ -759,7 +780,7 @@ paths:
                       readerId: { type: string, minLength: 1, maxLength: 64 }
                       antenna: { type: integer, minimum: 0, maximum: 255 }
                       locationCode: { type: string, maxLength: 60 }
-                      epc: { type: string, pattern: "^[0-9A-Fa-f]{24}$" }
+                      epc: { type: string, pattern: "^[0-9A-Fa-f]{24,64}$" }
                       rssi: { type: integer, minimum: -200, maximum: 0 }
                       readAt: { type: string, format: date-time }
       responses:
@@ -838,7 +859,7 @@ paths:
     post:
       operationId: reportTransportOrder
       summary: The connector reports a PENDING order sent to the PLC, or refused by it
-      description: Repeating the status it has changes nothing. Any other state is 409 WMS-AUTO-ORDER-STATE.
+      description: Repeating the status it has changes nothing. Any other state is 409 WMS-AUTO-ORDER-STATE. A refused order gives its work back to people, as a fault does (the line notes the PLC's reason and a work still assigned to the station returns to OPEN).
       x-passage-duty: warehouse.automation.execute
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -861,10 +882,101 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { description: WMS-AUTO-ORDER-NOT-FOUND }
         "409": { description: WMS-AUTO-ORDER-STATE }
+  /v1/warehouse/automation/transport-orders/{id}:cancel:
+    post:
+      operationId: cancelTransportOrder
+      summary: Cancel an automation order that has not arrived; its work goes back to people
+      description: >
+        A REFUSED, FAULT or DIVERTED order is cancelled at once. A PENDING or SENT order may be in the PLC's hands (the
+        connector sends the MOVE before it reports the order sent): clear the move on the PLC first and send
+        `plcCleared: true`, else 409 WMS-AUTO-ORDER-STATE. An ARRIVED order is done (409).
+        Cancelling a cancelled order changes nothing. The work line notes the reason, and a work still ASSIGNED to the
+        station with no other live order there returns to OPEN.
+      x-passage-duty: warehouse.work.supervise
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 200 }
+                plcCleared: { type: boolean, description: A person has made sure the PLC no longer holds the move. }
+      responses:
+        "200":
+          description: The cancelled order.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AutomationOrder" } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: WMS-AUTO-ORDER-NOT-FOUND }
+        "409": { description: WMS-AUTO-ORDER-STATE }
+  /v1/warehouse/rfid-rules:
+    get:
+      operationId: listRFIDRules
+      summary: What a read at each reader does (FR-32.9)
+      x-passage-duty: warehouse.setup.view
+      parameters:
+        - { name: readerId, in: query, required: false, schema: { type: string, maxLength: 64 } }
+      responses:
+        "200":
+          description: The rules.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/RFIDRule" } } } } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: createRFIDRule
+      summary: Say what a read at a reader (or one antenna of it) does
+      description: >
+        Every rule acts in one warehouse (`warehouseId`) and names `postedBy`, the user the reader's gateway posts its
+        reads as: a read of that reader posted by anyone else is stored but runs no rule, so a reader id in a request
+        body cannot borrow a rule. RECEIVE_PALLET (a dock-door portal) receives the expected ASN pallet of the warehouse
+        whose SSCC or license plate was read, at the quantity the ASN announced, as `rfid:<reader>`. CONFIRM_PUTAWAY (a
+        reader at a location; `locationCode` required) confirms the open put-away line of the pallet that was read when
+        the line is bound for that location of the warehouse: like a PLC station, the reader takes an OPEN work as
+        `rfid:<reader>` and confirms it; a work a person holds is left for that person (SKIPPED). A reader (antenna) has
+        at most one rule per action: 409 WMS-RFID-RULE-EXISTS.
+      x-passage-duty: warehouse.setup.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [readerId, action, warehouseId, postedBy]
+              properties:
+                readerId: { type: string, minLength: 1, maxLength: 64 }
+                antenna: { type: integer, minimum: 0, maximum: 255, description: Left out for every antenna of the reader. }
+                action: { type: string, enum: [RECEIVE_PALLET, CONFIRM_PUTAWAY] }
+                warehouseId: { type: string, format: uuid }
+                locationCode: { type: string, maxLength: 60, description: Required for CONFIRM_PUTAWAY. }
+                postedBy: { type: string, minLength: 1, maxLength: 200, description: The user the reader's gateway posts its reads as. }
+      responses:
+        "201":
+          description: The rule.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RFIDRule" } } }
+        "400": { $ref: "#/components/responses/Validation" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: WMS-RFID-RULE-EXISTS }
+  /v1/warehouse/rfid-rules/{id}:
+    delete:
+      operationId: deleteRFIDRule
+      summary: Remove an RFID rule; reads already acted on keep what was done
+      x-passage-duty: warehouse.setup.maintain
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Removed. }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: WMS-RFID-RULE-NOT-FOUND }
   /v1/warehouse/automation/events:
     post:
       operationId: ingestAutomationEvents
-      summary: The PLC's events: arrived, diverted, fault (FR-32.12)
+      summary: "The PLC's events: arrived, diverted, fault (FR-32.12)"
       description: >
         Each event is stored once by station, link session and sequence: the PLC numbers its telegrams per session
         (from 1 again after the connector dials it again, wrapping after 99999), so a telegram the PLC repeats within
@@ -1032,6 +1144,33 @@ components:
               epc: { type: object, additionalProperties: true }
               receiptId: { type: string, format: uuid }
               lineNo: { type: integer }
+              actions:
+                type: array
+                description: What the reader's rules did with the read.
+                items:
+                  type: object
+                  required: [ruleId, action, outcome]
+                  properties:
+                    ruleId: { type: string, format: uuid }
+                    action: { type: string, enum: [RECEIVE_PALLET, CONFIRM_PUTAWAY] }
+                    outcome: { type: string, enum: [DONE, SKIPPED, REFUSED] }
+                    detail: { type: string }
+                    receiptId: { type: string, format: uuid }
+                    lineNo: { type: integer }
+                    workId: { type: string, format: uuid }
+    RFIDRule:
+      type: object
+      required: [id, readerId, action, warehouseId, postedBy, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        postedBy: { type: string }
+        readerId: { type: string }
+        antenna: { type: integer }
+        action: { type: string, enum: [RECEIVE_PALLET, CONFIRM_PUTAWAY] }
+        warehouseId: { type: string, format: uuid }
+        locationCode: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
     AutomationOrder:
       type: object
       required: [id, workId, lineNo, station, loadUnit, fromLocation, toLocation, priority, status, createdBy, createdAt]

@@ -255,8 +255,7 @@ describe("convert a planned order (FR-22.10, FR-22.18)", () => {
     fill("Item", uuid(9), component);
     fill("Quantity per unit", "3", component);
     const operation = screen.getByRole("group", { name: "Operation 1" });
-    await within(operation).findByRole("option", { name: "CNC mill (CNC-1)" });
-    await userEvent.selectOptions(within(operation).getByLabelText("Resource"), uuid(10));
+    fireEvent.change(within(operation).getByLabelText("Resource"), { target: { value: uuid(10) } });
     fill("Run hours per unit", "0.5", operation);
     await userEvent.click(screen.getByRole("button", { name: "Create production order" }));
     await waitFor(() => expect(location.pathname).toBe(`/production/${orderId}`));

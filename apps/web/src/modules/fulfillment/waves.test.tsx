@@ -405,7 +405,7 @@ describe("shipment detail, slice 3", () => {
     server.handler = (url, init) => (init.method === "POST" ? json(422, { code: "FUL-0042", detail: "stop here" }) : base(url, init));
     renderAt(`/fulfillment/shipments/${SH}`);
     fireEvent.change(await screen.findByLabelText("Unit cost"), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText("Cost snapshot id"), { target: { value: "s" } });
+    fireEvent.change(screen.getByLabelText("Cost version"), { target: { value: "0195d6a0-0000-7000-8000-00000000c057" } });
     fireEvent.click(screen.getByLabelText("Send an advance ship notice (ASN)"));
     fireEvent.click(screen.getByRole("button", { name: "Post packing slip" }));
     await screen.findByText(/stop here/);

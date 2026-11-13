@@ -110,3 +110,19 @@ func TestResendCheck_BR2511(t *testing.T) {
 		}
 	}
 }
+
+func TestSignatureMeaningIsCheckedOnSignatureSteps(t *testing.T) {
+	doc := func(ins Instruction) RecipeDoc {
+		return RecipeDoc{Procedure: Procedure{Name: "P", UnitProcedures: []UnitProcedure{{Name: "U", Operations: []Operation{{Name: "O",
+			Phases: []Phase{{Name: "Ph", Instructions: []Instruction{ins}}}}}}}}}
+	}
+	if f := doc(Instruction{Seq: 1, Category: InstSignature, Text: "Sign the weigh-off", Meaning: "verified"}).FieldErrors(DestKiosk); len(f) != 0 {
+		t.Fatalf("verified signature: %v", f)
+	}
+	if f := doc(Instruction{Seq: 1, Category: InstSignature, Text: "Sign", Meaning: "liked"}).FieldErrors(DestKiosk); f["recipe.procedure.unitProcedures[0].operations[0].phases[0].instructions[0].meaning"] == "" {
+		t.Fatalf("unknown meaning: %v", f)
+	}
+	if f := doc(Instruction{Seq: 1, Category: InstText, Text: "Read", Meaning: "approved"}).FieldErrors(DestKiosk); f["recipe.procedure.unitProcedures[0].operations[0].phases[0].instructions[0].meaning"] == "" {
+		t.Fatalf("meaning on a text step: %v", f)
+	}
+}

@@ -402,7 +402,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"POST /v1/warehouse/dock-doors":                              dutySetupMaintain,
 		"GET /v1/warehouse/dock-doors":                               dutyInquiry,
 		"POST /v1/warehouse/dock-appointments":                       dutyReceive + " or " + dutyShipConfirm,
-		"GET /v1/warehouse/dock-appointments":                        dutyInquiry,
+		"GET /v1/warehouse/dock-appointments":                        dutyInquiry + " or " + dutyGateOperate,
+		"GET /v1/warehouse/dock-appointments/{id}":                   dutyInquiry + " or " + dutyGateOperate,
 		"POST /v1/warehouse/receipts:from-asn":                       dutyReceive,
 		"GET /v1/warehouse/receipts":                                 dutyInquiry,
 		"GET /v1/warehouse/receipts/{id}":                            dutyInquiry,
@@ -416,6 +417,10 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"GET /v1/warehouse/automation/transport-orders":              dutyInquiry + " or " + dutyAutomation,
 		"POST /v1/warehouse/automation/transport-orders/{id}:report": dutyAutomation,
 		"POST /v1/warehouse/automation/events":                       dutyAutomation,
+		"POST /v1/warehouse/automation/transport-orders/{id}:cancel": dutyWorkSupervise,
+		"GET /v1/warehouse/rfid-rules":                               dutySetupView,
+		"POST /v1/warehouse/rfid-rules":                              dutySetupMaintain,
+		"DELETE /v1/warehouse/rfid-rules/{id}":                       dutySetupMaintain,
 	}
 	served := 0
 	router := httpx.NewRouter()

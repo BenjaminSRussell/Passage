@@ -71,11 +71,6 @@ function renderAt(path: string) {
 const header = (call: { init: RequestInit }, name: string) => new Headers(call.init.headers).get(name);
 const posts = (suffix: string) => calls.filter((c) => c.method === "POST" && c.url.pathname.endsWith(suffix));
 const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
-const pick = async (label: string, value: string) => {
-  const select = screen.getByLabelText(label);
-  await waitFor(() => expect(select.querySelector(`option[value="${value}"]`)).not.toBeNull());
-  fireEvent.change(select, { target: { value } });
-};
 
 const machine: Machine = {
   id: "0195f0a0-0000-7000-8000-000000000020",
@@ -143,7 +138,7 @@ describe("Machines", () => {
     const { container } = renderAt("/shopfloor/machines/new");
     expect(pageViolations(container)).toEqual([]);
     fill("Machine code", "M-101");
-    await pick("Work center", RESOURCE);
+    fill("Work center", RESOURCE);
     fill("Ideal cycle time (seconds)", "60");
     fireEvent.click(screen.getByRole("button", { name: "Register machine" }));
     expect(await findTable({ name: "Machines" })).toBeInTheDocument();
@@ -160,7 +155,7 @@ describe("Machines", () => {
 
     handler = () => json(409, { code: "SF-0109", detail: "machine code or resource is already registered" });
     fill("Machine code", "M-101");
-    await pick("Work center", RESOURCE);
+    fill("Work center", RESOURCE);
     fill("Ideal cycle time (seconds)", "60");
     fireEvent.click(screen.getByRole("button", { name: "Register machine" }));
     expect(await screen.findByText("This machine code or resource is already registered.")).toBeInTheDocument();

@@ -1514,7 +1514,9 @@
       {"resource": "/v1/eam/rounds/*/work-orders", "methods": ["POST"]},
       {"resource": "/v1/eam/work-orders", "methods": ["POST"]},
       {"resource": "/v1/eam/work-orders/*/downtime", "methods": ["POST"]},
-      {"resource": "/v1/eam/work-orders/*/status", "methods": ["POST"]}
+      {"resource": "/v1/eam/work-orders/*/status", "methods": ["POST"]},
+      {"resource": "/v1/engineering/resources", "methods": ["GET"]},
+      {"resource": "/v1/engineering/resources/*", "methods": ["GET"]}
     ]},
     "eam.request.create": {"permissions": [{"resource": "/v1/eam/requests", "methods": ["POST"]}]},
     "eam.setup.admin": {"permissions": [
@@ -1533,7 +1535,9 @@
       {"resource": "/v1/eam/work-orders/*/faults", "methods": ["POST"]},
       {"resource": "/v1/eam/work-orders/*/labor", "methods": ["POST"]},
       {"resource": "/v1/eam/work-orders/*/status", "methods": ["POST"]},
-      {"resource": "/v1/eam/work-orders/*/stops/*", "methods": ["POST"]}
+      {"resource": "/v1/eam/work-orders/*/stops/*", "methods": ["POST"]},
+      {"resource": "/v1/engineering/resources", "methods": ["GET"]},
+      {"resource": "/v1/engineering/resources/*", "methods": ["GET"]}
     ]},
     "hr.absence.self": {"permissions": [
       {"resource": "/v1/hr/absence/plans", "methods": ["GET"]},
@@ -1582,7 +1586,10 @@
       {"resource": "/v1/hr/offers/*/hire", "methods": ["POST"]},
       {"resource": "/v1/hr/positions/*/assignments", "methods": ["POST"]},
       {"resource": "/v1/hr/tasks/*/finish", "methods": ["POST"]},
-      {"resource": "/v1/hr/workers/*/checklists", "methods": ["POST"]}
+      {"resource": "/v1/hr/workers/*/checklists", "methods": ["POST"]},
+      {"resource": "/v1/hr/checklist-templates", "methods": ["GET"]},
+      {"resource": "/v1/hr/employments/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/workers/*/employments", "methods": ["GET"]}
     ]},
     "hr.compensation.admin": {"permissions": [
       {"resource": "/v1/hr/compensation/cycles", "methods": ["GET", "POST"]},
@@ -1646,8 +1653,9 @@
     "hr.questionnaire.admin": {"permissions": [
       {"resource": "/v1/hr/questionnaires", "methods": ["GET", "POST"]},
       {"resource": "/v1/hr/questionnaires/*", "methods": ["GET"]},
-      {"resource": "/v1/hr/questionnaires/schedules", "methods": ["POST"]},
-      {"resource": "/v1/hr/questionnaires/schedules/*/results", "methods": ["GET"]}
+      {"resource": "/v1/hr/questionnaires/schedules", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/questionnaires/schedules/*/results", "methods": ["GET"]},
+      {"resource": "/v1/hr/questionnaires/schedules/*", "methods": ["GET"]}
     ]},
     "hr.performance.manage": {"permissions": [
       {"resource": "/v1/hr/workers/*/goals", "methods": ["GET", "POST"]},
@@ -1692,7 +1700,8 @@
       {"resource": "/v1/hr/workers/*/checklists", "methods": ["GET"]},
       {"resource": "/v1/hr/workers/*/employments", "methods": ["GET"]},
       {"resource": "/v1/hr/workers/*/loaned-items", "methods": ["GET"]},
-      {"resource": "/v1/hr/workers/*/skills", "methods": ["GET"]}
+      {"resource": "/v1/hr/workers/*/skills", "methods": ["GET"]},
+      {"resource": "/v1/hr/employments/*", "methods": ["GET"]}
     ]},
     "hr.worker.maintain": {"permissions": [
       {"resource": "/v1/hr/benefits/enrollments/*/end", "methods": ["POST"]},
@@ -1842,7 +1851,10 @@
     "fulfillment.packing-slip.post": {"permissions": [
       {"resource": "/v1/fulfillment/packing-slips/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/fulfillment/shipments/*:post-packing-slip", "methods": ["POST"]},
-      {"resource": "/v1/fulfillment/sales-delivery-reports/*:retry", "methods": ["POST"]}
+      {"resource": "/v1/fulfillment/sales-delivery-reports/*:retry", "methods": ["POST"]},
+      {"resource": "/v1/costing/versions", "methods": ["GET"]},
+      {"resource": "/v1/costing/versions/*", "methods": ["GET"]},
+      {"resource": "/v1/costing/products/*/cost", "methods": ["GET"]}
     ]},
     "compliance.privacy-request.create": {"permissions": [{"resource": "/v1/privacy/requests", "methods": ["POST"]}]},
     "compliance.privacy-request.process": {"permissions": [
@@ -2098,7 +2110,9 @@
       {"resource": "/v1/transport/gate/check-out", "methods": ["POST"]},
       {"resource": "/v1/transport/gate/visits", "methods": ["GET"]},
       {"resource": "/v1/transport/gate/visits/*", "methods": ["GET"]},
-      {"resource": "/v1/transport/gate/visits/*:seal", "methods": ["POST"]}
+      {"resource": "/v1/transport/gate/visits/*:seal", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/dock-appointments", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/dock-appointments/*", "methods": ["GET"]}
     ]},
     "transport.landed-cost.maintain": {"permissions": [
       {"resource": "/v1/transport/goods-in-transit", "methods": ["GET", "POST"]},
@@ -2186,6 +2200,7 @@
       {"resource": "/print/v1/routing-rules", "methods": ["GET"]},
       {"resource": "/print/v1/document-templates", "methods": ["GET"]},
       {"resource": "/print/v1/document-templates/*", "methods": ["GET"]},
+      {"resource": "/print/v1/document-templates/*/versions", "methods": ["GET"]},
       {"resource": "/print/v1/text-blocks", "methods": ["GET"]},
       {"resource": "/print/v1/output-rules", "methods": ["GET"]},
       {"resource": "/print/v1/output-plan", "methods": ["GET"]}
@@ -2689,7 +2704,9 @@
       {"resource": "/v1/lean/board", "methods": ["GET"]},
       {"resource": "/v1/lean/kanban-jobs/*:complete", "methods": ["POST"]},
       {"resource": "/v1/lean/kanban-jobs/*:start", "methods": ["POST"]},
-      {"resource": "/v1/lean/kanbans/*:move", "methods": ["POST"]}
+      {"resource": "/v1/lean/kanbans/*:move", "methods": ["POST"]},
+      {"resource": "/v1/engineering/resources", "methods": ["GET"]},
+      {"resource": "/v1/engineering/resources/*", "methods": ["GET"]}
     ]},
     "lean.kanban.write": {"permissions": [{"resource": "/v1/lean/kanbans:generate", "methods": ["POST"]}]},
     "lean.read": {"permissions": [
@@ -3267,6 +3284,7 @@
       {"resource": "/v1/production/batch-orders/*:send-recipe", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:report-finished", "methods": ["POST"]},
       {"resource": "/v1/production/batch-orders/*:rescale", "methods": ["POST"]},
+      {"resource": "/v1/production/batch-orders/*/potency-adjustments", "methods": ["PUT"]},
       {"resource": "/v1/production/batch-orders/*:start", "methods": ["POST"]},
       {"resource": "/v1/production/bulk-consolidation:preview", "methods": ["POST"]},
       {"resource": "/v1/production/rework-orders:preview", "methods": ["POST"]},
@@ -3532,7 +3550,8 @@
       {"resource": "/v1/sales/return-orders/*:disposition", "methods": ["POST"]},
       {"resource": "/v1/sales/return-orders/*:credit", "methods": ["POST"]},
       {"resource": "/v1/sales/return-orders:backfill-reservations", "methods": ["POST"]},
-      {"resource": "/v1/sales/return-orders/*:reject", "methods": ["POST"]}
+      {"resource": "/v1/sales/return-orders/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/pricing/resolve", "methods": ["POST"]}
     ]},
     "sales.parameter.maintain": {"permissions": [
       {"resource": "/v1/sales/parameters", "methods": ["PUT"]},
@@ -3642,7 +3661,8 @@
       {"resource": "/v1/shopfloor/edge-nodes", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/edge-nodes/*", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/edge-nodes/*/config-versions", "methods": ["POST"]},
-      {"resource": "/v1/shopfloor/edge-nodes/*:enrollment-token", "methods": ["POST"]}
+      {"resource": "/v1/shopfloor/edge-nodes/*:enrollment-token", "methods": ["POST"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*/certificates/*:revoke", "methods": ["POST"]}
     ]},
     "shopfloor.edge.connect": {"permissions": [
       {"resource": "/v1/shopfloor/edge-nodes/*/config", "methods": ["GET"]},
@@ -3681,6 +3701,7 @@
       {"resource": "/v1/shopfloor/process-messages:retry-due", "methods": ["POST"]}
     ]},
     "shopfloor.setup.maintain": {"permissions": [
+      {"resource": "/v1/shopfloor/andon-settings", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/absence-codes", "methods": ["POST"]},
       {"resource": "/v1/shopfloor/absence-codes/*", "methods": ["PUT"]},
       {"resource": "/v1/shopfloor/machines", "methods": ["POST"]},
@@ -3717,6 +3738,8 @@
       {"resource": "/v1/shopfloor/pi-sheets/*:obsolete", "methods": ["POST"]}
     ]},
     "shopfloor.view": {"permissions": [
+      {"resource": "/v1/shopfloor/andon-settings", "methods": ["GET"]},
+      {"resource": "/v1/shopfloor/edge-nodes/*/certificates", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/pi-sheets", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/pi-sheets/*", "methods": ["GET"]},
       {"resource": "/v1/shopfloor/control-recipes", "methods": ["GET"]},
@@ -3857,7 +3880,8 @@
       {"resource": "/v1/warehouse/work/*", "methods": ["GET"]},
       {"resource": "/v1/warehouse/rfid-reads", "methods": ["GET"]},
       {"resource": "/v1/warehouse/pallets/*/label", "methods": ["GET"]},
-      {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["GET"]}
+      {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/dock-appointments/*", "methods": ["GET"]}
     ]},
     "warehouse.rfid.ingest": {"permissions": [{"resource": "/v1/warehouse/rfid-reads:ingest", "methods": ["POST"]}]},
     "warehouse.automation.execute": {"permissions": [
@@ -3874,13 +3898,16 @@
       {"resource": "/v1/warehouse/dock-doors", "methods": ["POST"]},
       {"resource": "/v1/warehouse/gs1-settings", "methods": ["PUT"]},
       {"resource": "/v1/warehouse/location-directives", "methods": ["POST"]},
-      {"resource": "/v1/warehouse/locations:bulk", "methods": ["POST"]}
+      {"resource": "/v1/warehouse/locations:bulk", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/rfid-rules", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/rfid-rules/*", "methods": ["DELETE"]}
     ]},
     "warehouse.setup.view": {"permissions": [
       {"resource": "/v1/warehouse/gs1-settings", "methods": ["GET"]},
       {"resource": "/v1/warehouse/location-directives", "methods": ["GET"]},
       {"resource": "/v1/warehouse/location-directives:simulate", "methods": ["POST"]},
-      {"resource": "/v1/warehouse/locations", "methods": ["GET"]}
+      {"resource": "/v1/warehouse/locations", "methods": ["GET"]},
+      {"resource": "/v1/warehouse/rfid-rules", "methods": ["GET"]}
     ]},
     "warehouse.shipment.confirm": {"permissions": [{"resource": "/v1/warehouse/dock-appointments", "methods": ["POST"]}]},
     "warehouse.work.execute": {"permissions": [
@@ -3901,6 +3928,7 @@
     "warehouse.work.supervise": {"permissions": [
       {"resource": "/v1/warehouse/work", "methods": ["POST"]},
       {"resource": "/v1/warehouse/automation/transport-orders", "methods": ["POST"]},
+      {"resource": "/v1/warehouse/automation/transport-orders/*:cancel", "methods": ["POST"]},
       {"resource": "/v1/mobile/sessions", "methods": ["GET"]},
       {"resource": "/v1/mobile/sessions:sweep", "methods": ["POST"]},
       {"resource": "/v1/mobile/sessions/*:force-signout", "methods": ["POST"]}

@@ -31,9 +31,11 @@ import (
 )
 
 const (
-	readyTimeout      = 500 * time.Millisecond
-	idempotencyKey    = "Idempotency-Key"
-	dutyRead          = "costing.read"
+	readyTimeout   = 500 * time.Millisecond
+	idempotencyKey = "Idempotency-Key"
+	dutyRead       = "costing.read"
+	// dutySlipPost is fulfillment's packing slip duty: the poster reads the standard cost and cost versions.
+	dutySlipPost      = "fulfillment.packing-slip.post"
 	dutyVersionWrite  = "costing.version.write"
 	dutyPPVPost       = "costing.ppv.post"
 	validationDetail  = "request failed validation"
@@ -86,14 +88,15 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/costing/valuation-ledgers:preview", a.previewValuationLedgers)
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/costing/aging:preview", a.previewAging)
 	r.With(authz.RequireDuty(dutyVersionWrite)).Post("/v1/costing/versions", a.createVersion)
-	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/versions", a.listVersions)
-	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/versions/{id}", a.getVersion)
+	// Posting a packing slip records each line's unit cost and the cost version it came from, so the poster reads both.
+	r.With(authz.RequireAnyDuty(dutyRead, dutySlipPost)).Get("/v1/costing/versions", a.listVersions)
+	r.With(authz.RequireAnyDuty(dutyRead, dutySlipPost)).Get("/v1/costing/versions/{id}", a.getVersion)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/versions/{id}/item-costs", a.listItemCosts)
 	r.With(authz.RequireDuty(dutyVersionWrite)).Post("/v1/costing/versions/{id}/item-costs:import", a.importItemCosts)
 	r.With(authz.RequireDuty(dutyVersionWrite)).Post("/v1/costing/versions/{id}/item-costs:copy", a.copyItemCosts)
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/costing/versions/{id}:preview-activation", a.previewActivation)
 	r.With(authz.RequireDuty(dutyVersionActivate)).Post("/v1/costing/versions/{id}:activate", a.activateVersion)
-	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/products/{id}/cost", a.currentCost)
+	r.With(authz.RequireAnyDuty(dutyRead, dutySlipPost)).Get("/v1/costing/products/{id}/cost", a.currentCost)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/valuation-ledgers", a.listValuationLedgers)
 	r.With(authz.RequireDuty(dutyValuationWrite)).Post("/v1/costing/valuation-ledgers", a.createValuationLedger)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/costing/valuation-categories", a.listValuationCategories)

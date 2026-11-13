@@ -33,6 +33,8 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
       const url = new URL(input, "http://localhost");
+      // The price prefill reads the customer group and asks pricing for the price; these tests are about the order calls only.
+      if (url.pathname === "/api/v1/pricing/resolve" || url.pathname.startsWith("/api/v1/party/customers/")) return new Response("{}", { status: 404, headers: { "Content-Type": "application/json" } });
       calls.push({ method: init.method ?? "GET", url, headers: new Headers(init.headers), body: init.body ? JSON.parse(init.body as string) : undefined });
       const { status, body } = await handler(url, init);
       return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });

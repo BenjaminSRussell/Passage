@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../../shell/api/http";
-import { Select } from "../../shell/ui";
+import { EntityLookup } from "../../shell/lookup/EntityLookup";
 
-// Work centres and machines have no shell lookup entity yet, so the manufacturing modules share this small reader of
-// the engineering resource master: ids show as "Name (CODE)" and forms pick a resource from a list of names.
+// The manufacturing modules share this small reader of the engineering resource master: ids (or codes) show as
+// "Name (CODE)". Forms pick a resource through the shell's "resource" lookup entity (ResourceSelect).
 
 export interface ResourceRef {
   id: string;
@@ -56,7 +56,7 @@ export function ResourceName({ id, fallback }: { id: string; fallback?: string }
   return <span>{found ? formatResource(found) : (fallback ?? id)}</span>;
 }
 
-/** A resource picked by name. The value is the resource id. */
+/** A resource picked by name through the shell's resource lookup. The value is the resource id. */
 export function ResourceSelect({
   value,
   onChange,
@@ -72,15 +72,15 @@ export function ResourceSelect({
   "aria-invalid"?: boolean | "true" | "false";
   "aria-required"?: boolean;
 }) {
-  const rows = useResources();
   return (
-    <Select {...aria} value={value} onChange={(event) => onChange(event.target.value)}>
-      <option value="">{emptyLabel}</option>
-      {rows.map((r) => (
-        <option key={r.id} value={r.id}>
-          {formatResource(r)}
-        </option>
-      ))}
-    </Select>
+    <EntityLookup
+      {...aria}
+      entity="resource"
+      prefill={false}
+      placeholder={emptyLabel}
+      invalid={aria["aria-invalid"] === true || aria["aria-invalid"] === "true"}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
   );
 }

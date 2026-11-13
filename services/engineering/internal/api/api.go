@@ -28,17 +28,21 @@ import (
 )
 
 const (
-	readyTimeout      = 500 * time.Millisecond
-	idempotencyKey    = "Idempotency-Key"
-	dutyRead          = "engineering.read"
-	dutyBomWrite      = "engineering.bom.write"
-	dutyEcoApprove    = "engineering.eco.approve"
-	dutyEcoWorkflow   = "engineering.eco.workflow"
-	dutyEcrReview     = "engineering.ecr.review"
-	dutyResourceWrite = "engineering.resource.write"
-	dutyRouteWrite    = "engineering.route.write"
-	dutyReleaseAccept = "engineering.release.accept"
-	dutyDocSign       = "engineering.doc.sign"
+	readyTimeout   = 500 * time.Millisecond
+	idempotencyKey = "Idempotency-Key"
+	dutyRead       = "engineering.read"
+	// Duties of other services whose forms pick a resource (work cell, production resource) through the lookup.
+	dutyLeanKanbanWork = "lean.kanban.work"
+	dutyEAMExecute     = "eam.work-order.execute"
+	dutyEAMPlan        = "eam.work.plan"
+	dutyBomWrite       = "engineering.bom.write"
+	dutyEcoApprove     = "engineering.eco.approve"
+	dutyEcoWorkflow    = "engineering.eco.workflow"
+	dutyEcrReview      = "engineering.ecr.review"
+	dutyResourceWrite  = "engineering.resource.write"
+	dutyRouteWrite     = "engineering.route.write"
+	dutyReleaseAccept  = "engineering.release.accept"
+	dutyDocSign        = "engineering.doc.sign"
 	// dutyImportWrite and dutyImportRead are held only by the migration loader (service:migration-loader): it creates
 	// draft BOM and route versions from a legacy extract and reads them back by id for reconciliation.
 	dutyImportWrite     = "engineering.import.write"
@@ -159,8 +163,9 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/resource-groups", a.createResourceGroup)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/capabilities", a.createCapability)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/resources", a.createResource)
-		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resources", a.listResources)
-		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resources/{id}", a.getResource)
+		// The resource lookup serves the lean work cell board and the EAM downtime form, whose users hold their own duties.
+		r.With(authz.RequireAnyDuty(dutyRead, dutyLeanKanbanWork, dutyEAMExecute, dutyEAMPlan)).Get("/v1/engineering/resources", a.listResources)
+		r.With(authz.RequireAnyDuty(dutyRead, dutyLeanKanbanWork, dutyEAMExecute, dutyEAMPlan)).Get("/v1/engineering/resources/{id}", a.getResource)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Put("/v1/engineering/resources/{id}", a.updateResource)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Delete("/v1/engineering/resources/{id}", a.deleteResource)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resource-groups", a.listResourceGroups)

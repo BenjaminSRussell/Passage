@@ -1,53 +1,87 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, FormField, Input, PageHeader } from "../../shell/ui";
-import { isUuid } from "./format";
-import styles from "./pages.module.css";
+import { EntityName } from "../../shell/lookup/EntityName";
+import { ListPage, type ListColumn, type ListData } from "../../shell/ui";
+import { listPendingChanges, type PendingChange } from "./api/client";
+import { formatDateTime, isUuid } from "./format";
+import { useLoad } from "./useLoad";
 
-/** Look up a credit-limit change by id, then open the approval view. */
+const columns: ListColumn<PendingChange>[] = [
+  { key: "customerId", header: "Customer", render: (c) => <EntityName entity="customer" id={c.customerId} />, sortValue: () => "" },
+  { key: "legalEntityId", header: "Legal entity", render: (c) => <EntityName entity="legalEntity" id={c.legalEntityId} />, sortValue: () => "", defaultHidden: true },
+  { key: "currentValue", header: "Current limit", align: "end", render: (c) => c.currentValue ?? "None", csv: (c) => c.currentValue ?? "" },
+  { key: "requestedValue", header: "Requested limit", align: "end" },
+  { key: "requestedBy", header: "Requested by" },
+  { key: "requestedAt", header: "Requested", render: (c) => formatDateTime(c.requestedAt), csv: (c) => c.requestedAt },
+];
+
+interface MorePages {
+  rows: PendingChange[];
+  cursor?: string;
+  loading: boolean;
+}
+
+/** The held increases, a page at a time. */
+function usePendingRows(): ListData<PendingChange> {
+  const [forbidden, setForbidden] = useState(false);
+  const [more, setMore] = useState<MorePages | null>(null);
+  const state = useLoad(async (signal) => {
+    try {
+      const page = await listPendingChanges(undefined, signal);
+      if (!signal.aborted) setForbidden(false);
+      return page;
+    } catch (error) {
+      if (!signal.aborted) setForbidden((error as { status?: number }).status === 403);
+      throw error;
+    }
+  }, "pending-changes");
+  const cursor = more ? more.cursor : state.data?.nextCursor;
+  async function loadMore() {
+    if (!cursor || more?.loading) return;
+    setMore({ rows: more?.rows ?? [], cursor, loading: true });
+    try {
+      const page = await listPendingChanges(cursor);
+      setMore({ rows: [...(more?.rows ?? []), ...page.items], cursor: page.nextCursor, loading: false });
+    } catch {
+      setMore({ rows: more?.rows ?? [], cursor, loading: false });
+    }
+  }
+  return {
+    rows: state.error ? [] : [...(state.data?.items ?? []), ...(more?.rows ?? [])],
+    loading: state.loading,
+    loadingMore: Boolean(more?.loading),
+    error: state.error ?? undefined,
+    forbidden,
+    hasMore: Boolean(cursor),
+    loadMore: () => void loadMore(),
+    retry: () => {
+      setMore(null);
+      state.reload();
+    },
+  };
+}
+
+/** Credit-limit increases held for approval; open one to approve or reject it. A link with ?id= opens that change. */
 export function PendingChangesPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [draft, setDraft] = useState(params.get("id") ?? "");
-  const [error, setError] = useState("");
-
-  function open(event: FormEvent) {
-    event.preventDefault();
-    const value = draft.trim();
-    if (!isUuid(value)) {
-      setError("Enter the pending change id (a UUID).");
-      return;
-    }
-    setError("");
-    navigate(`/party/pending-changes/${value}`);
-  }
-
+  const linked = params.get("id") ?? "";
+  useEffect(() => {
+    if (isUuid(linked)) navigate(`/party/pending-changes/${linked}`, { replace: true });
+  }, [linked, navigate]);
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Credit limit approvals"
-        description="Open a held credit-limit increase by its pending-change id. The stored limit does not change until the request is approved."
-      />
-      <form className={styles.toolbar} onSubmit={open} noValidate aria-label="Open a credit limit change">
-        <FormField id="change-id" label="Pending change id" hint="The id returned when an increase was requested." error={error || undefined}>
-          {(control) => (
-            <Input
-              {...control}
-              value={draft}
-              className={styles.mono}
-              maxLength={36}
-              onChange={(event) => setDraft(event.target.value)}
-              invalid={Boolean(error)}
-            />
-          )}
-        </FormField>
-        <Button type="submit" variant="primary">
-          Open change
-        </Button>
-      </form>
-      <p className={styles.note}>
-        There is no list of open requests on the party API yet, so this page opens one change at a time.
-      </p>
-    </div>
+    <ListPage
+      id="party-pending-changes"
+      title="Credit limit approvals"
+      description="Credit-limit increases held for approval, newest first. The stored limit does not change until the request is approved."
+      noun="changes"
+      singular="change"
+      columns={columns}
+      useRows={usePendingRows}
+      search={(c) => ({ number: c.requestedValue, name: c.requestedBy })}
+      getRowKey={(c) => c.id}
+      onRowOpen={(c) => navigate(`/party/pending-changes/${encodeURIComponent(c.id)}`)}
+      empty={{ title: "No credit limit changes waiting", description: "A credit-limit increase above the approval threshold waits here until someone approves or rejects it." }}
+    />
   );
 }

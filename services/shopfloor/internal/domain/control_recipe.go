@@ -86,6 +86,26 @@ type Instruction struct {
 	// Materials is the structured form of a material-list instruction, scaled to the batch: the PI sheet
 	// shows each product by name with its quantity. Text stays required as the plain-language summary.
 	Materials []InstructionMaterial `json:"materials,omitempty"`
+	// Meaning is what a signature-request step's signature means (21 CFR 11.50(a)(3), FR-24.22): performed,
+	// verified, reviewed or approved. The kiosk shows it to the signer and records it with the signature; a step
+	// without one is signed as performed.
+	Meaning string `json:"meaning,omitempty"`
+}
+
+// Signature meanings of a signature-request step.
+var SignatureMeanings = []string{"performed", "verified", "reviewed", "approved"}
+
+// ValidMeaning reports whether m is a signature meaning ("" is the default, performed).
+func ValidMeaning(m string) bool {
+	if m == "" {
+		return true
+	}
+	for _, x := range SignatureMeanings {
+		if x == m {
+			return true
+		}
+	}
+	return false
 }
 
 // InstructionMaterial is one line of a material-list instruction.
@@ -205,6 +225,12 @@ func checkInstruction(f map[string]string, path string, want int, in Instruction
 	}
 	if len(in.Text) > 4000 {
 		f[path+".text"] = "must be at most 4000 characters"
+	}
+	switch {
+	case in.Meaning != "" && in.Category != InstSignature:
+		f[path+".meaning"] = "applies to a signature-request step only"
+	case !ValidMeaning(in.Meaning):
+		f[path+".meaning"] = "must be performed, verified, reviewed or approved"
 	}
 	switch in.Category {
 	case InstText, InstSignature, InstMaterials, InstSequence, InstCalculation:
@@ -393,4 +419,76 @@ func RecipeEnd(category, phasePath string, values []Characteristic, doc RecipeDo
 		}
 	}
 	return "", "", false
+}
+
+// Node types of a process control system a readback tolerance is chosen by (OPC-UA built-in data types).
+var integerNodeTypes = map[string]bool{"SByte": true, "Byte": true, "Int16": true, "UInt16": true, "Int32": true, "UInt32": true, "Int64": true, "UInt64": true}
+
+// DefaultReadbackTolerance is the absolute tolerance of a Double node or of a node whose type the connector does not
+// report (an MQTT topic).
+const DefaultReadbackTolerance = 0.001
+
+// KnownNodeType reports whether t is a node type the readback rule distinguishes ("" is unknown and allowed).
+func KnownNodeType(t string) bool {
+	return t == "" || t == "Double" || t == "Float" || t == "Boolean" || integerNodeTypes[t]
+}
+
+// ReadbackTolerance is how far the value read back may be from the value written for a node of nodeType before the
+// write is a deviation (BR-25.15): a Double within DefaultReadbackTolerance, a Float also within the rounding of a
+// 32-bit float (2^-23 of the value), an integer or Boolean exactly. The connector applies the same rule.
+func ReadbackTolerance(nodeType string, written decimal.Decimal) decimal.Decimal {
+	def := decimal.NewFromFloat(DefaultReadbackTolerance)
+	switch {
+	case nodeType == "Float":
+		rel := written.Abs().Div(decimal.NewFromInt(1 << 23))
+		if rel.GreaterThan(def) {
+			return rel
+		}
+		return def
+	case nodeType == "Boolean", integerNodeTypes[nodeType]:
+		return decimal.Zero
+	}
+	return def
+}
+
+// CodeSignatureStep is a signature in a process message that does not match the step it signs: no such signature
+// step in the recipe, or a meaning other than the step's (21 CFR 11.50). 422.
+const CodeSignatureStep = "SF-0186"
+
+// SignatureStep finds the instruction a kiosk step key names: "unit procedure/operation/phase/seq", as the kiosk builds
+// it. ok is false when the recipe has no such instruction.
+func (d RecipeDoc) SignatureStep(key string) (Instruction, bool) {
+	parts := strings.Split(key, "/")
+	if len(parts) != 4 {
+		return Instruction{}, false
+	}
+	for _, up := range d.Procedure.UnitProcedures {
+		if up.Name != parts[0] {
+			continue
+		}
+		for _, op := range up.Operations {
+			if op.Name != parts[1] {
+				continue
+			}
+			for _, ph := range op.Phases {
+				if ph.Name != parts[2] {
+					continue
+				}
+				for _, in := range ph.Instructions {
+					if fmt.Sprint(in.Seq) == parts[3] {
+						return in, true
+					}
+				}
+			}
+		}
+	}
+	return Instruction{}, false
+}
+
+// MeaningOf is the meaning a signature step's signature carries: the step's own, or performed.
+func MeaningOf(in Instruction) string {
+	if in.Meaning == "" {
+		return "performed"
+	}
+	return in.Meaning
 }

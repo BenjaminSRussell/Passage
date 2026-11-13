@@ -81,6 +81,7 @@ type Store interface {
 	ListDoors(ctx context.Context, warehouseID string) ([]domain.DockDoor, error)
 	CreateAppointment(ctx context.Context, idem store.Idem, a domain.Appointment) (domain.Appointment, bool, error)
 	ListAppointments(ctx context.Context, f store.AppointmentFilter) ([]domain.Appointment, error)
+	GetAppointment(ctx context.Context, id string) (domain.Appointment, error)
 	RegisterASN(ctx context.Context, idem store.Idem, r domain.Receipt) (domain.Receipt, bool, error)
 	ListReceipts(ctx context.Context, f store.ReceiptFilter) ([]domain.ReceiptSummary, error)
 	GetReceipt(ctx context.Context, id string) (domain.Receipt, error)
@@ -91,6 +92,10 @@ type Store interface {
 	ListAutomationOrders(ctx context.Context, f store.OrderFilter) ([]store.AutomationOrder, error)
 	ReportAutomationOrder(ctx context.Context, id, status, reason string, now time.Time) (store.AutomationOrder, error)
 	IngestAutomationEvents(ctx context.Context, station string, events []store.AutomationEvent, now time.Time) (store.AutomationIngest, error)
+	CancelAutomationOrder(ctx context.Context, in store.CancelInput) (store.AutomationOrder, error)
+	CreateRFIDRule(ctx context.Context, r store.RFIDRule) (store.RFIDRule, error)
+	ListRFIDRules(ctx context.Context, readerID string) ([]store.RFIDRule, error)
+	DeleteRFIDRule(ctx context.Context, id string) error
 	GetGS1Company(ctx context.Context) (store.GS1Company, error)
 	GetPalletLabel(ctx context.Context, sscc string) (store.PalletLabel, error)
 	PutGS1Company(ctx context.Context, prefix string, extension int, by string) (store.GS1Company, error)

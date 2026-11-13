@@ -3,8 +3,8 @@ import { useNames } from "../mfg-shared/names";
 import { useNavigate } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
-import { closeManifest, describeProblem, listManifestCandidates, listManifests, MANIFEST_STATUSES, type Manifest, type ManifestCandidate, type ManifestStatus, type Problem } from "./api/client";
+import { Alert, Badge, Button, Card, DataTable, FormField, Input, ListPage, loadedRows, Select, type BadgeTone, type DataTableColumn, type ListData, type ListFilterDef, type ListQuery } from "../../shell/ui";
+import { closeManifest, describeProblem, FulfillmentApiError, listManifestCandidates, listManifests, MANIFEST_STATUSES, type Manifest, type ManifestCandidate, type ManifestStatus, type Problem } from "./api/client";
 import { dash, formatDate, formatDateTime, shortId, today } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
@@ -148,71 +148,59 @@ function CloseCard({ groups, onDone }: { groups: Group[]; onDone(manifest: Manif
   );
 }
 
+const manifestFilters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: MANIFEST_STATUSES.map((s) => ({ value: s, label: LABELS[s] })) },
+  { kind: "text", key: "carrier", label: "Carrier" },
+];
+
 /** Carrier manifests (FR-28.6): the closed ones, the parcels still missing from a pickup, and the form that closes one. */
 export function ManifestsPage() {
   const navigate = useNavigate();
   const canShip = holdsDuty(usePrincipalDuties(), DUTY_SHIP);
-  const [status, setStatus] = useState<ManifestStatus | "">("");
-  const [carrier, setCarrier] = useState("");
-  const carrierOk = carrier === "" || CARRIER_CODE.test(carrier.trim());
-  const manifests = useLoad((signal) => listManifests({ status, carrier: carrierOk ? carrier.trim().toLowerCase() : "" }, signal), `manifests-${status}-${carrier}`);
+  // Bumped after a close, so the list reads the new manifest.
+  const [reloads, setReloads] = useState(0);
+  const useManifestRows = (query: ListQuery): ListData<Manifest> => {
+    const status = (query.filters.status ?? "") as ManifestStatus | "";
+    const carrier = (query.filters.carrier ?? "").trim().toLowerCase();
+    const state = useLoad(async (signal) => {
+      if (carrier !== "" && !CARRIER_CODE.test(carrier)) throw new FulfillmentApiError(400, "FUL-FILTER-CARRIER", "Use 2 to 32 letters, digits or hyphens for the carrier.", {});
+      return listManifests({ status, carrier }, signal);
+    }, `manifests-${status}-${carrier}-${reloads}`);
+    return loadedRows(state);
+  };
   const candidates = useLoad((signal) => listManifestCandidates(signal), "manifest-candidates");
   const [closed, setClosed] = useState<Manifest | null>(null);
   const groups = useMemo(() => groupCandidates(candidates.data ?? []), [candidates.data]);
 
   function done(made: Manifest) {
     setClosed(made);
-    manifests.reload();
+    setReloads((n) => n + 1);
     candidates.reload();
   }
 
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Carrier manifests"
-        description="The end-of-day close-out of the labelled parcels a carrier collects from a warehouse, so the carrier takes exactly what was handed over."
-      />
-      {closed ? (
-        <p role="status" className={styles.note}>
-          Closed {closed.manifestNumber} with {closed.parcelCount} parcel{closed.parcelCount === 1 ? "" : "s"} for {closed.carrier}.
-        </p>
-      ) : null}
-      <div className={styles.toolbar}>
-        <FormField id="manifest-status" label="Status">
-          {(control) => (
-            <Select {...control} value={status} onChange={(event) => setStatus(event.target.value as ManifestStatus | "")}>
-              <option value="">All statuses</option>
-              {MANIFEST_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {LABELS[s]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormField>
-        <FormField id="manifest-carrier" label="Carrier" error={carrierOk ? undefined : "Use 2 to 32 letters, digits or hyphens."}>
-          {(control) => <Input {...control} value={carrier} maxLength={32} invalid={!carrierOk} onChange={(event) => setCarrier(event.target.value)} />}
-        </FormField>
-      </div>
-      {manifests.error ? (
-        <Alert tone="danger" title="Could not load the manifests" live="alert" action={<Button size="sm" onClick={manifests.reload}>Try again</Button>}>
-          <ProblemMessage problem={manifests.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Carrier manifests"
-          columns={columns}
-          rows={manifests.data ?? []}
-          getRowKey={(row) => row.id}
-          loading={manifests.loading}
-          onRowOpen={(row) => navigate(`/fulfillment/manifests/${row.id}`)}
-          empty={
-            status || carrier
-              ? { title: "No manifests match", description: "Change the filters." }
-              : { title: "No manifests yet", description: "Close one once labelled shipments have shipped." }
-          }
-        />
-      )}
+    <ListPage
+      id="fulfillment-manifests"
+      title="Carrier manifests"
+      description="The end-of-day close-out of the labelled parcels a carrier collects from a warehouse, so the carrier takes exactly what was handed over."
+      notice={
+        closed ? (
+          <p role="status" className={styles.note}>
+            Closed {closed.manifestNumber} with {closed.parcelCount} parcel{closed.parcelCount === 1 ? "" : "s"} for {closed.carrier}.
+          </p>
+        ) : null
+      }
+      noun="manifests"
+      singular="manifest"
+      columns={columns}
+      filters={manifestFilters}
+      useRows={useManifestRows}
+      search={(row) => ({ number: row.manifestNumber, name: row.carrier })}
+      getRowKey={(row) => row.id}
+      onRowOpen={(row) => navigate(`/fulfillment/manifests/${row.id}`)}
+      empty={{ title: "No manifests yet", description: "Close one once labelled shipments have shipped." }}
+      footer={
+        <>
       <Card title="Parcels on no manifest">
         {candidates.error ? (
           <Alert tone="danger" title="Could not load the unmanifested parcels" live="alert" action={<Button size="sm" onClick={candidates.reload}>Try again</Button>}>
@@ -234,6 +222,8 @@ export function ManifestsPage() {
         </p>
       </Card>
       {canShip ? <CloseCard key={groups.map((g) => `${g.key}:${g.ready}`).join(",")} groups={groups} onDone={done} /> : <p className={styles.note}>Closing or cancelling a manifest needs the shipping duty.</p>}
-    </div>
+        </>
+      }
+    />
   );
 }

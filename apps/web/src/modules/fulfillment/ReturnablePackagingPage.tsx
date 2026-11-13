@@ -1,13 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, listContainerTypes, listReturnableBalances, returnPackaging, type ContainerType, type Problem, type ReturnableBalance } from "./api/client";
+import { Button, buttonClassName, Card, FormField, Input, ListPage, loadedRows, Select, type DataTableColumn, type ListFilterDef, type ListQuery } from "../../shell/ui";
+import { describeProblem, listContainerTypes, listReturnableBalances, returnPackaging, type Problem, type ReturnableBalance } from "./api/client";
 import { formatDateTime, shortId, UUID } from "./format";
 import { ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
-import { ProblemMessage } from "../../shell/errors";
 import { PlainName } from "../sales/OrderNumber";
 
 const columns: DataTableColumn<ReturnableBalance>[] = [
@@ -18,10 +17,6 @@ const columns: DataTableColumn<ReturnableBalance>[] = [
   { key: "lastReturnedAt", header: "Last returned", render: (row) => formatDateTime(row.lastReturnedAt) },
 ];
 
-interface Data {
-  balances: ReturnableBalance[];
-  types: ContainerType[];
-}
 
 interface Values {
   customerId: string;
@@ -36,13 +31,16 @@ const blank: Values = { customerId: "", containerType: "", qty: "" };
  * holds. Posting a packing slip adds its returnable containers; a return
  * receipt takes them off, never below zero (FUL-0015).
  */
+const balanceFilters: ListFilterDef[] = [{ kind: "entity", key: "customerId", label: "Customer", entity: "customer" }];
+
 export function ReturnablePackagingPage() {
-  const [customer, setCustomer] = useState("");
-  const filter = UUID.test(customer.trim()) ? customer.trim() : "";
-  const state = useLoad<Data>(async (signal) => {
-    const [balances, types] = await Promise.all([listReturnableBalances({ customerId: filter }, signal), listContainerTypes(signal)]);
-    return { balances, types: types.filter((t) => t.returnable) };
-  }, filter);
+  // Bumped after a return, so the list reads the new balance.
+  const [reloads, setReloads] = useState(0);
+  const typeState = useLoad((signal) => listContainerTypes(signal).then((types) => types.filter((t) => t.returnable)), "returnable-types");
+  const useBalanceRows = (query: ListQuery) => {
+    const filter = query.filters.customerId ?? "";
+    return loadedRows(useLoad((signal) => listReturnableBalances({ customerId: filter }, signal), `${filter}-${reloads}`));
+  };
   const [values, setValues] = useState<Values>(blank);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -71,7 +69,7 @@ export function ReturnablePackagingPage() {
       key.renew();
       setValues(blank);
       setNotice(`Received. Customer ${shortId(saved.customerId)} now holds ${saved.balance} ${saved.containerType}.`);
-      state.reload();
+      setReloads((n) => n + 1);
     } catch (error) {
       setFailure(describeProblem(error));
       key.renew();
@@ -81,43 +79,28 @@ export function ReturnablePackagingPage() {
   }
 
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Returnable packaging"
-        description="Returnable pallets and crates each customer holds. Posting a packing slip adds its returnable containers; a return receipt takes them off."
-        actions={
-          <Link className={buttonClassName("secondary")} to="/fulfillment/returnable-movements">
-            Movements and corrections
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <FormField id="rtp-filter" label="Customer" hint="Show one customer's balances." optional>
-          {(control) => <EntityLookup entity="customer" {...control} value={customer} onChange={(event) => setCustomer(event.target.value)} />}
-        </FormField>
-      </div>
-      {state.error ? (
-        <Alert tone="danger" title="Could not load returnable balances" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
-          <ProblemMessage problem={state.error} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Returnable packaging balances"
-          columns={columns}
-          rows={state.data?.balances ?? []}
-          getRowKey={(row) => `${row.customerId}-${row.containerType}`}
-          loading={state.loading}
-          onRowOpen={(row) => {
-            setValues({ customerId: row.customerId, containerType: row.containerType, qty: "" });
-            key.renew();
-          }}
-          empty={
-            filter
-              ? { title: "This customer holds no returnable packaging", description: "Balances appear when a packing slip ships returnable containers to the customer." }
-              : { title: "No returnable packaging out", description: "Mark container types as returnable; shipping them builds the customer balances." }
-          }
-        />
-      )}
+    <ListPage
+      id="fulfillment-returnable-packaging"
+      title="Returnable packaging"
+      description="Returnable pallets and crates each customer holds. Posting a packing slip adds its returnable containers; a return receipt takes them off."
+      actions={
+        <Link className={buttonClassName("secondary")} to="/fulfillment/returnable-movements">
+          Movements and corrections
+        </Link>
+      }
+      noun="balances"
+      singular="balance"
+      columns={columns}
+      filters={balanceFilters}
+      useRows={useBalanceRows}
+      getRowKey={(row) => `${row.customerId}-${row.containerType}`}
+      onRowOpen={(row) => {
+        setValues({ customerId: row.customerId, containerType: row.containerType, qty: "" });
+        key.renew();
+      }}
+      empty={{ title: "No returnable packaging out", description: "Mark container types as returnable; shipping them builds the customer balances." }}
+      footer={
+        <>
       <Card title="Receive returned packaging">
         <form className={styles.form} onSubmit={submit} noValidate>
           <p className={styles.note}>A return above the customer&apos;s balance is refused (FUL-0015). Open a row above to fill in its customer and type.</p>
@@ -128,7 +111,7 @@ export function ReturnablePackagingPage() {
             {(control) => (
               <Select {...control} value={values.containerType} onChange={(event) => set({ containerType: event.target.value })}>
                 <option value="">Choose a returnable type</option>
-                {(state.data?.types ?? []).map((t) => (
+                {(typeState.data ?? []).map((t) => (
                   <option key={t.code} value={t.code}>
                     {t.code}
                   </option>
@@ -152,6 +135,8 @@ export function ReturnablePackagingPage() {
           </div>
         </form>
       </Card>
-    </div>
+        </>
+      }
+    />
   );
 }

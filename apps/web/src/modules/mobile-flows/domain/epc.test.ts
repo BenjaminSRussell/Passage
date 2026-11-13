@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifyScan } from "./gs1";
-import { checkDigitOf, decodeEpc, encodeSgtin96, epcToScan, EpcError } from "./epc";
+import { checkDigitOf, decodeEpc, encodeSgtin198, encodeSgtin96, epcToScan, EpcError } from "./epc";
 
 describe("EPC decoding (GS1 TDS vectors)", () => {
   it("decodes the SGTIN-96 of the TDS example urn:epc:id:sgtin:0614141.812345.6789", () => {
@@ -48,5 +48,17 @@ describe("EPC decoding (GS1 TDS vectors)", () => {
   it("computes the GS1 check digit", () => {
     expect(checkDigitOf("8061414112345")).toBe("8");
     expect(checkDigitOf("10614141234567890")).toBe("8");
+  });
+
+  it("reads an SGTIN-198 with its alphanumeric serial, as the warehouse service does", () => {
+    const hex = encodeSgtin198("70614141123451", "32a/b", 7);
+    // the same tag the service's encoder gives for company prefix 0614141, item reference 712345, serial 32a/b
+    expect(hex).toBe("3634257BF6B7A659B2C2BF100000000000000000000000000000");
+    const epc = decodeEpc(hex);
+    expect(epc).toMatchObject({ scheme: "SGTIN-198", filter: 1, companyPrefix: "0614141", gtin: "70614141123451", serial: "32a/b" });
+    expect(decodeEpc(hex.slice(0, 50)).serial).toBe("32a/b");
+    expect(epcToScan(hex)).toBe("]C1017061414112345121" + "32a/b");
+    expect(() => decodeEpc(hex.slice(0, 51) + "1")).toThrow(EpcError);
+    expect(() => encodeSgtin198("70614141123451", "with space", 7)).toThrow(/serial/);
   });
 });

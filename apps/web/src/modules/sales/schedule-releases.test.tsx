@@ -102,7 +102,7 @@ describe("Scheduling releases", () => {
     handler = (url) => (url.pathname.endsWith("/schedule-releases") ? { status: 200, body: { items: [held, { ...base, id: "x", releaseNo: "R-16", status: "SUPERSEDED" }] } } : { status: 200, body: agreement, etag: '"3"' });
     const { container } = renderAt(`/sales/agreements/${AGREEMENT_ID}/schedule-releases`);
     expect(await screen.findByRole("heading", { name: "Scheduling releases for SA-0000007" })).toBeInTheDocument();
-    const table = await findTable({ name: "Scheduling releases" });
+    const table = await findTable({ name: "Scheduling releases for SA-0000007" });
     expect(within(table).getByText("R-17")).toBeInTheDocument();
     expect(within(table).getByText("R-16")).toBeInTheDocument();
     expect(await screen.findByText("1200 EA")).toBeInTheDocument();
@@ -125,7 +125,7 @@ describe("Scheduling releases", () => {
 
     handler = () => ({ status: 500, body: { code: "COM-0500", detail: "boom" } });
     renderAt(`/sales/agreements/${AGREEMENT_ID}/schedule-releases`);
-    expect(await screen.findByText("Could not load the releases")).toBeInTheDocument();
+    expect(await screen.findByText("Could not load releases")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Try again" }).length).toBeGreaterThan(0);
   });
 
