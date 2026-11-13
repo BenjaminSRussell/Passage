@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
@@ -71,9 +72,11 @@ func (s *Postgres) UpdateRequisition(ctx context.Context, id string, version int
 				}
 			}
 		}
+		// A flagged punchout line marks the requisition for good (BR-35.13): an edit can set needs_approval, never clear it.
+		flagged := slices.ContainsFunc(edit.Lines, func(l RequisitionLine) bool { return l.NeedsApproval })
 		tag, err := tx.Exec(ctx, `update purchase_requisition set operating_unit_id = $3, currency = $4, total = $5, version = version + 1,
-			updated_at = now() where tenant_id = $1 and id = $2 and version = $6`,
-			p.TenantID, id, nullable(edit.OperatingUnitID), currency, total, version)
+			needs_approval = needs_approval or $7, updated_at = now() where tenant_id = $1 and id = $2 and version = $6`,
+			p.TenantID, id, nullable(edit.OperatingUnitID), currency, total, version, flagged)
 		if err != nil {
 			return err
 		}

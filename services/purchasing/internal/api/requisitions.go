@@ -456,10 +456,13 @@ func punchoutFieldsAllowed(p tenant.Principal, lines []requisitionLineBody) erro
 	return nil
 }
 
-// keepPunchoutFields makes the punchout fields of an edited requisition sticky: an edited line that is a punchout line of the
-// requisition (by supplierPartId when given, else by description and unit) takes the catalog source, supplier part and approval
-// flag from it, whatever the edit sent, and an edit may not mark any other line as a punchout line.
-func keepPunchoutFields(cur store.Requisition, lines []requisitionLineBody) ([]requisitionLineBody, error) {
+// keepPunchoutFields makes the punchout fields of an edited requisition sticky (#35, 35-3). An edited line that is a punchout line of
+// the requisition (by supplierPartId when the edit names one, else by description and unit, as the requisition editor sends lines
+// back without the punchout fields) takes the catalog source, supplier part and approval flag from it, whatever the edit sent. A
+// line that names punchout fields but matches no punchout line is refused: only the punchout return adds punchout lines. A punchout
+// line whose price the edit raises above the returned price, or leaves blank, or whose requisition changes currency, is flagged
+// (BR-35.13): the price check the punchout return made no longer holds for it.
+func keepPunchoutFields(cur store.Requisition, lines []requisitionLineBody, currency string) ([]requisitionLineBody, error) {
 	byPart := map[string]store.RequisitionLine{}
 	byText := map[string]store.RequisitionLine{}
 	textKey := func(desc, unit string) string {
@@ -474,6 +477,7 @@ func keepPunchoutFields(cur store.Requisition, lines []requisitionLineBody) ([]r
 		}
 		byText[textKey(l.Description, l.Unit)] = l
 	}
+	sameCurrency := strings.EqualFold(strings.TrimSpace(currency), cur.Currency)
 	out := make([]requisitionLineBody, len(lines))
 	for i, l := range lines {
 		var (
@@ -481,16 +485,19 @@ func keepPunchoutFields(cur store.Requisition, lines []requisitionLineBody) ([]r
 			ok  bool
 		)
 		if part := strings.TrimSpace(l.SupplierPartID); part != "" {
-			if src, ok = byPart[part]; !ok {
-				return nil, invalid("lines["+strconv.Itoa(i)+"].supplierPartId", "names no punchout line of this requisition; only the punchout return adds punchout lines")
-			}
-		} else if hasPunchoutFields(l) {
-			return nil, invalid("lines["+strconv.Itoa(i)+"].catalogSource", "is set by the punchout return only")
+			src, ok = byPart[part]
 		} else {
 			src, ok = byText[textKey(l.Description, l.Unit)]
 		}
+		if !ok && hasPunchoutFields(l) {
+			return nil, invalid("lines["+strconv.Itoa(i)+"].catalogSource", "names no punchout line of this requisition; only the punchout return adds punchout lines")
+		}
 		if ok {
 			l.CatalogSource, l.SupplierPartID, l.NeedsApproval = src.CatalogSource, src.SupplierPartID, src.NeedsApproval
+			price, err := decimal.NewFromString(strings.TrimSpace(l.EstimatedUnitPrice))
+			if !sameCurrency || err != nil || price.GreaterThan(src.EstimatedUnitPrice) {
+				l.NeedsApproval = true
+			}
 		}
 		out[i] = l
 	}
