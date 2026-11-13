@@ -121,6 +121,11 @@ func (a *API) createShipmentProposals(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, batchDTO(existing))
 		return
 	}
+	// After the replay lookup, so a batch created before the customer's self-billing agreement still replays.
+	if err := a.refuseSelfBilled(r.Context(), req.LegalEntityID, req.CustomerID, slips); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
 	plans, err := domain.PlanProposals(slips, req.Consolidate, invoiceDate, a.maxLines)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))

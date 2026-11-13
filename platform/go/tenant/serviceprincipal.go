@@ -19,17 +19,25 @@ var ErrUnknownServicePrincipal = errors.New("unknown service principal")
 // test keeps them equal.
 var servicePrincipals = map[string][]string{
 	"edi-sales": {"sales.channel.intake"},
-	// The cXML exchange (#35, 35-4): an inbound ConfirmationRequest confirms the purchase order it answers and a ShipNoticeRequest creates
-	// the receiving ASN, as the legal entity of the order, with only these three duties.
-	"edi-cxml": {"procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"},
+	// The cXML exchange (#35, 35-4): an inbound ConfirmationRequest confirms the purchase order it answers, a ShipNoticeRequest creates
+	// the receiving ASN and an InvoiceDetailRequest lands in payables' vendor-invoice intake, as the legal entity of the order, with only
+	// these four duties.
+	"edi-cxml": {"procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain", "payables.vendor-invoice.intake"},
 	// The consumer of fulfillment's asn.issued and billing's invoice.posted (#35, 35-1): it sends the 856, DESADV, 810 or
 	// INVOIC the partners of the legal entity asked for, through the same from-source path the route uses.
 	"edi-outbound": {"edi.outbound.from-event"},
+	// The self-billing match (#35, 35-5): it asks the tax service for the VAT rate of a customer's self-billed document, as the
+	// legal entity of the partner, with only the calculate duty.
+	"edi-selfbill": {"tax.tax.calculate"},
 	// The reporter of posted invoices to sales (#29): it signs :record-progress calls, and its token holds only the one duty of
 	// billing's grant on sales that reports invoices (sales.order.record-invoice).
 	"billing-sales-report": {"sales.order.record-invoice"},
 	// The reporter of booked invoices and credit notes to the tax service (#29): it signs POST /v1/tax/transactions only.
 	"billing-tax-report": {"tax.transaction.record"},
+	// The consumers of intercompany's chargeinvoice.requested (#40): billing raises the lender's invoice proposal and payables takes
+	// the borrower's vendor invoice into its intake. Each holds one flag duty and reaches no route.
+	"billing-iccharge":   {"billing.iccharge.from-event"},
+	"payables-iccharge":  {"payables.iccharge.from-event"},
 	"finreport-ledger":   {"ledger.entry.lookup"},
 	"purchasing-inbound": {"purchasing.inbound.apply"},
 	"fulfillment-order":  {"fulfillment.order.sync"},
@@ -63,8 +71,11 @@ var servicePrincipals = map[string][]string{
 var servicePrincipalIssuers = map[string][]string{
 	"billing-sales-report":     {"billing"},
 	"billing-tax-report":       {"billing"},
+	"billing-iccharge":         {"billing"},
+	"payables-iccharge":        {"payables"},
 	"edi-cxml":                 {"edi"},
 	"edi-outbound":             {"edi"},
+	"edi-selfbill":             {"edi"},
 	"edi-sales":                {"edi"},
 	"finreport-ledger":         {"finreport"},
 	"purchasing-inbound":       {"purchasing"},

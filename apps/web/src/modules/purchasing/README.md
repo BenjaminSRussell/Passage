@@ -79,3 +79,11 @@ waves 6 to 8 are available to modules.
 Tests: `npx vitest --run src/modules/purchasing` (`pages.test.tsx`, `agreements.test.tsx`,
 `consolidation.test.tsx`, `openSupply.test.tsx`, `orderLifecycle.test.tsx`, `rfq.test.tsx`, `rfqSealed.test.tsx`, `invoicingPlan.test.tsx`, `reprice.test.tsx`, `scheduling.test.tsx`, `signing.test.tsx`, `charges.test.tsx`, `service.test.tsx` and `inbound.test.tsx` drive every route against a stubbed `fetch` through
 `testHarness.tsx`).
+
+## Punchout catalogs (#35, 35-3)
+
+`/purchasing/punchout` (duty `edi.requisition.create`) lists the suppliers with a punchout catalog (`GET /api/v1/edi/punchout/suppliers`),
+opens a session (`POST /api/v1/edi/punchout/sessions`, cXML or SAP OCI) and links to the supplier's catalog in a new tab. The
+requester's sessions show their returned cart (lines left out under BR-35.13 are listed with their reason, and a line priced above the
+catalog price is flagged), and a returned cart becomes a draft requisition (`:create-requisition`) that opens from the row. The client
+is `api/punchout.ts`; the EDI engine owns these routes.

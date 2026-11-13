@@ -20,7 +20,7 @@ const (
 	DutyRequisitionCreate = "procurement.requisition.create"
 )
 
-// RequisitionLine is one line of purchasing's RequisitionInput: a non-catalog line (description and category) with its estimate.
+// RequisitionLine is one line of purchasing's RequisitionInput: a line by description and category with its estimate.
 type RequisitionLine struct {
 	Description        string `json:"description"`
 	Category           string `json:"category"`
@@ -28,6 +28,11 @@ type RequisitionLine struct {
 	Unit               string `json:"unit"`
 	EstimatedUnitPrice string `json:"estimatedUnitPrice"`
 	RequestedDate      string `json:"requestedDate"`
+	// CatalogSource PUNCHOUT, SupplierPartID and NeedsApproval mark a punchout line in purchasing (BR-35.13): a flagged line keeps
+	// the requisition from being approved automatically.
+	CatalogSource  string `json:"catalogSource,omitempty"`
+	SupplierPartID string `json:"supplierPartId,omitempty"`
+	NeedsApproval  bool   `json:"needsApproval,omitempty"`
 }
 
 // RequisitionRequest is the body of POST /v1/procurement/requisitions.

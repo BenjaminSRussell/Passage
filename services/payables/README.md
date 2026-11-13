@@ -47,12 +47,30 @@ The preview settles one credit against open invoices per PRD FR-19.2: priority o
 
 `GET /v1/payables/vendor/payments` (service-only duty `payables.vendor-portal.read`, granted to the `supplier-portal` service; list its public key in `PASSAGE_SERVICE_PUBLIC_KEYS` as `supplier-portal=...`) lists the verified vendor's invoices, newest first, with `status` (`OPEN`, `SCHEDULED` while an approved or running payment proposal holds the item, `PARTIALLY_PAID`, `PAID`, `CANCELLED`), `amount`, `paidAmount`, `openAmount`, `dueDate`, `scheduledFor` (the proposal's run date) and `paidAt` (the run's settlement date, else the last settlement). Query: `status`, `limit` (1 to 200, default 50), `cursor`. The vendor is the token's (`Principal.VendorID`); a caller that is not the supplier portal acting for a vendor is 403 `PAY-VND-001`, and a `vendorId` query is ignored. A payment hold, a vendor block, the proposal and the bank details are not shown (a held item reads `OPEN`). `invoiceId` is the id of the receiving invoice, so it matches `invoiceId` of an invoice submission.
 
+## Vendor invoices received electronically (#35, 35-4)
+
+`POST /v1/payables/vendor-invoice-intake` (service-only duty `payables.vendor-invoice.intake`, granted to `edi`; list edi's public
+key in `PASSAGE_SERVICE_PUBLIC_KEYS` as `edi=...`) stores a vendor invoice a procurement network sent as a cXML InvoiceDetailRequest:
+vendor (from the purchase order the invoice names), invoice number and date, purpose, purchase order, currency, lines as sent, net
+(the lines) and gross. Nothing is posted to the ledger and no open item is created: an AP clerk reads the intake
+(`GET /v1/payables/vendor-invoice-intake[/{id}]`, duty `open-item.read`), matches it to receipt lines and posts it in receiving,
+whose `invoice.posted` opens the item. The same document again replays (200); changed content is 409 `AP-VII-001`; the vendor's
+invoice number received from another document is 409 `AP-VII-002`. Migration 0019.
+
+`payables consume` (chart `consumer.*`, off by default, #40) reads intercompany's `chargeinvoice.requested` (topic
+`passage.interco.chargeinvoice`, KafkaUser `deploy/kafka/payables-consumer.yaml`, dead-letter topic `passage.payables.iccharge.dlq`)
+and takes the borrower's vendor invoice into the same intake (source `INTERCOMPANY`): the borrower's legal entity, the pairing's
+vendor account, invoice number `IC-<source id>-v<version>`, the charge's price as net and price plus the cross-border tax as gross.
+It runs as the service principal `payables-iccharge` (flag duty `payables.iccharge.from-event`); a redelivery is a no-op.
+
 ## Error codes
 
 | Code | Status | Meaning |
 |---|---|---|
 | PAY-0001 | 400 | invalid field: date, decimal string, currency, discount, duplicate or empty invoices |
 | PAY-0002 | 422 | rate missing for a foreign currency, or not 1 for the accounting currency; also an fx service with no rate for the pair and date |
+| AP-VII-001 | 409 | the electronic vendor invoice document was already received with different content |
+| AP-VII-002 | 409 | the vendor's invoice number was already received from another document |
 | PAY-VND-001 | 403 | the caller is not the supplier portal acting for a vendor (payment status read) |
 | AP-RUN-002 | 422 | bank identifier failed validation (`iban`, `bic` or `aba` named in the detail) |
 | AP-FIL-001 | 422 | payment name has a character outside the profile charset after transliteration |

@@ -351,6 +351,12 @@ func TestCharge_PricedFromStoredPricesWithCrossBorderTax(t *testing.T) {
 	if events != 1 {
 		t.Errorf("chargeinvoice.requested events = %d, want 1", events)
 	}
+	// The event names both legal entities, so billing and payables raise the documents there (#40).
+	var lender, borrower string
+	if err := e.pool.QueryRow(context.Background(), `select payload->'data'->>'lenderLegalEntityId', payload->'data'->>'borrowerLegalEntityId' from outbox
+		where type = 'dev.passage.interco.chargeinvoice.requested.v1'`).Scan(&lender, &borrower); err != nil || lender != leA || borrower != leB {
+		t.Errorf("legal entities = %q %q, %v", lender, borrower, err)
+	}
 }
 
 func TestCharge_ATaxServiceThatIsDownStopsTheChargeBeforePosting(t *testing.T) {

@@ -34,6 +34,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/edi/internal/secrets"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/sources"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/taxrate"
 	"github.com/BenjaminSRussell/passage/services/edi/migrations"
 )
 
@@ -120,7 +121,19 @@ func run() error {
 		if purchasingURL != "" && receivingURL != "" {
 			src.WithReceiving(receivingURL)
 			a.CXMLMapper = &cxmlmap.Mapper{Store: st, Purchasing: src, Receiving: src}
+			// An inbound cXML invoice lands in payables' vendor-invoice intake when its URL is set; otherwise it is parked (EDI-0040).
+			if payablesURL := os.Getenv("EDI_PAYABLES_URL"); payablesURL != "" {
+				a.CXMLMapper.Payables = src.WithPayables(payablesURL)
+			}
 		}
+	}
+	// Self-billed lines are checked at the VAT rate the tax service determines when its URL is set (35-5).
+	if taxURL := os.Getenv("EDI_TAX_URL"); taxURL != "" && signer != nil {
+		tax, err := taxrate.New(taxURL, signer, nil)
+		if err != nil {
+			return err
+		}
+		a.SelfBillTax = tax
 	}
 	tc, err := loadTransportConfig(os.Getenv, addr)
 	if err != nil {

@@ -29,3 +29,20 @@ postingProfilesSecret: ""
 fieldCrypt:
   keysSecret: ""
   currentKeyId: ""
+# The intercompany charge consumer (#40, args [consume]): takes the borrower's vendor invoice of intercompany's
+# chargeinvoice.requested (Invoice settlement mode) into the vendor-invoice intake. It exits at start unless
+# service:payables-iccharge is seeded. Off by default, like the other consumers, until it is turned on per environment
+# (intercompany's outbox connector creates the topic). Its KafkaUser, ACLs and dead-letter topic are deploy/kafka/payables-consumer.yaml.
+# The edi chart's payablesUrl needs edi's public key in serviceIdentity.publicKeys (edi=...) for the cXML invoice intake (#35).
+consumer:
+  enabled: false
+  replicaCount: 1
+  kafka:
+    brokers: ""
+    group: payables-iccharge
+    username: payables-consumer
+    dlqTopic: passage.payables.iccharge.dlq
+    secret: ""
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 128Mi }

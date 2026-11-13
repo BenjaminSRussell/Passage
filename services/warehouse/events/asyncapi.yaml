@@ -7,8 +7,7 @@ info:
     the change and relayed by Debezium as CloudEvents 1.0 (source "warehouse",
     subject = work or receipt id, Kafka key = that id). Payload fields are
     snake_case and quantities are decimal strings. wave.released.v1 and
-    load.shipped.v1 arrive with waves and loads in later slices. Nothing is
-    consumed yet.
+    load.shipped.v1 arrive with waves and loads in later slices. shipment.shipped is consumed by the EDI engine.
 defaultContentType: application/json
 channels:
   wmsWork:
@@ -23,6 +22,11 @@ channels:
     description: Topic of every receipt event (platform events.Topic).
     messages:
       receiptRegistered: { $ref: "#/components/messages/receiptRegistered" }
+  wmsShipment:
+    address: passage.wms.shipment
+    description: Topic of the shipment events (platform events.Topic); the EDI engine's outbound consumer reads it.
+    messages:
+      shipmentShipped: { $ref: "#/components/messages/shipmentShipped" }
 operations:
   publishWorkCreated:
     action: send
@@ -40,8 +44,22 @@ operations:
     action: send
     channel: { $ref: "#/channels/wmsReceipt" }
     messages: [{ $ref: "#/channels/wmsReceipt/messages/receiptRegistered" }]
+  publishShipmentShipped:
+    action: send
+    channel: { $ref: "#/channels/wmsShipment" }
+    messages: [{ $ref: "#/channels/wmsShipment/messages/shipmentShipped" }]
 components:
   messages:
+    shipmentShipped:
+      name: dev.passage.wms.shipment.shipped.v1
+      title: Shipment shipped
+      summary: >
+        The warehouse confirmed that a fulfillment shipment left the dock
+        without a packing slip posted for it (POST
+        /v1/warehouse/shipments/{id}:ship). Subject and Kafka key are the
+        shipment id. Consumer: the EDI engine (edi-outbound), which sends the
+        whole shipment's 856 or DESADV (#35, 35-1).
+      payload: { $ref: "#/components/schemas/ShipmentShipped" }
     workCreated:
       name: dev.passage.wms.work.created.v1
       title: Work created
@@ -78,6 +96,24 @@ components:
         (PO receipt), quality.
       payload: { $ref: "#/components/schemas/ReceiptRegistered" }
   schemas:
+    ShipmentShipped:
+      type: object
+      required: [shipment_id, legal_entity_id, warehouse_id, shipped_at, containers, user]
+      properties:
+        shipment_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        warehouse_id: { type: string, format: uuid }
+        carrier_code: { type: string, description: The carrier's SCAC, when known. }
+        shipped_at: { type: string, format: date-time }
+        containers:
+          type: array
+          description: The containers that left; empty means every closed container of the shipment.
+          items:
+            type: object
+            required: [sscc]
+            properties:
+              sscc: { type: string, pattern: "^[0-9]{18}$" }
+        user: { type: string }
     Decimal:
       type: string
       pattern: "^-?[0-9]+(\\.[0-9]+)?$"

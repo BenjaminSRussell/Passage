@@ -99,6 +99,8 @@ type Store interface {
 	GetGS1Company(ctx context.Context) (store.GS1Company, error)
 	GetPalletLabel(ctx context.Context, sscc string) (store.PalletLabel, error)
 	PutGS1Company(ctx context.Context, prefix string, extension int, by string) (store.GS1Company, error)
+	ConfirmShipped(ctx context.Context, idem store.Idem, c store.ShipConfirmation) (store.ShipConfirmation, bool, error)
+	GetShipConfirmation(ctx context.Context, shipmentID string) (store.ShipConfirmation, error)
 }
 
 // registerPersisted mounts the routes that read and write warehouse state.
@@ -118,6 +120,7 @@ func (a *API) registerPersisted(r chi.Router) {
 		r.With(authz.RequireDuty(dutyWorkExecute)).Post("/v1/warehouse/work/{id}/lines/{n}:confirm", a.confirmLine)
 		r.With(authz.RequireDuty(dutyWorkExecute)).Post("/v1/warehouse/work/{id}:exception", a.exceptWork)
 		a.registerReceiving(r)
+		a.registerShipped(r)
 	})
 }
 

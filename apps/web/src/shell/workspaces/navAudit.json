@@ -495,6 +495,7 @@
     {"to": "/purchasing/procure-to-pay", "module": "purchasing", "label": "Procure to pay", "area": "procurement", "decision": "keep", "taskLabel": "Follow a purchase to payment"},
     {"to": "/purchasing/requisitions", "module": "purchasing", "label": "Requisitions", "area": "procurement", "decision": "keep", "taskLabel": "Purchase requests"},
     {"to": "/purchasing/approvals", "module": "purchasing", "label": "Requisition approvals", "area": "procurement", "decision": "keep", "taskLabel": "Approve purchase requests"},
+    {"to": "/purchasing/punchout", "module": "purchasing", "label": "Punchout catalogs", "area": "procurement", "decision": "advanced"},
     {"to": "/purchasing/consolidation", "module": "purchasing", "label": "Consolidation", "area": "procurement", "decision": "keep"},
     {"to": "/purchasing/releases", "module": "purchasing", "label": "Release runs", "area": "procurement", "decision": "keep", "taskLabel": "Turn requests into orders"},
     {"to": "/purchasing/rfqs", "module": "purchasing", "label": "Requests for quotation", "area": "procurement", "decision": "keep", "taskLabel": "Request quotes from vendors"},
