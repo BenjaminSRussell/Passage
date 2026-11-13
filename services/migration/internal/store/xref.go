@@ -159,6 +159,23 @@ func (m *Mem) ListXref(_ context.Context, f XrefFilter) ([]XrefRow, error) {
 	return out[:min(len(out), clampLimit(f.Limit))], nil
 }
 
+// ResolveXref is the in-memory ResolveXref; the Mem store has no legal-entity scope.
+func (m *Mem) ResolveXref(_ context.Context, system, entity string, keys []string) (map[string]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	want := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		want[k] = true
+	}
+	out := map[string]string{}
+	for k, e := range m.xref.Entries {
+		if k.SourceSystem == system && k.Entity == entity && want[k.SourceKey] {
+			out[k.SourceKey] = e.TargetID
+		}
+	}
+	return out, nil
+}
+
 func compareXref(system, entity, key string, c XrefCursor) int {
 	if d := strings.Compare(system, c.SourceSystem); d != 0 {
 		return d
@@ -184,4 +201,29 @@ func (m *Mem) XrefSummary(context.Context) ([]XrefCount, error) {
 		return strings.Compare(a.SourceSystem+"\x00"+a.Entity, b.SourceSystem+"\x00"+b.Entity)
 	})
 	return out, nil
+}
+
+// ResolveXref returns the Passage id of each of the keys of one entity from one source system that the cross-reference holds,
+// following a merge to the surviving record. Keys it does not hold are left out. The caller's legal-entity scope applies: a
+// scoped caller sees the rows of its legal entities only.
+func (s *Postgres) ResolveXref(ctx context.Context, system, entity string, keys []string) (map[string]string, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := map[string]string{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select source_key, coalesce(merged_into_target_id, target_id)::text from migration.xref
+			where tenant_id = $1 and source_system = $2 and source_entity = $3 and source_key = any($4::text[])`, p.TenantID, system, entity, keys)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var key, id string
+			if err := rows.Scan(&key, &id); err != nil {
+				return err
+			}
+			out[key] = id
+		}
+		return rows.Err()
+	})
+	return out, err
 }

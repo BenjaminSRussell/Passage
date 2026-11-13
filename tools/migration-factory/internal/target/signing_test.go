@@ -80,13 +80,16 @@ func TestServiceGrantForTheFactoryIsSeeded(t *testing.T) {
 	if want := []string{"opening-item.import", "opening-item.import.read"}; !slices.Equal(slices.Sorted(slices.Values(payables)), want) {
 		t.Errorf("the grant for migration-factory -> payables must hold exactly %v (opening-item import, #565), got %v", want, payables)
 	}
-	if inv := tenant.ServiceGrantTable()[target.ServiceName]["inventory"]; !slices.Equal(slices.Sorted(slices.Values(inv)), []string{"inventory.import.read", "inventory.import.write"}) {
-		t.Errorf("the grant for migration-factory -> inventory must hold exactly the opening stock import duties, got %v", inv)
+	if inv := tenant.ServiceGrantTable()[target.ServiceName]["inventory"]; !slices.Equal(slices.Sorted(slices.Values(inv)), []string{"inventory.import.read", "inventory.import.write", "inventory.read"}) {
+		t.Errorf("the grant for migration-factory -> inventory must hold exactly the opening stock import duties and the on-hand read-back (H-S9-2), got %v", inv)
+	}
+	if mig := tenant.ServiceGrantTable()[target.ServiceName]["migration"]; !slices.Equal(mig, []string{"migration.xref.read"}) {
+		t.Errorf("the grant for migration-factory -> migration must hold exactly the cross-reference read (H-S8-6), got %v", mig)
 	}
 	if trs := tenant.ServiceGrantTable()[target.ServiceName]["treasury"]; !slices.Equal(slices.Sorted(slices.Values(trs)), []string{"treasury.import.read", "treasury.import.write"}) {
 		t.Errorf("the grant for migration-factory -> treasury must hold exactly the opening balance import duties, got %v", trs)
 	}
-	if other := tenant.ServiceGrantTable()[target.ServiceName]; len(other) != 5 {
-		t.Errorf("migration-factory is granted only receivables, payables (opening items), inventory and treasury (opening imports) and ledger (replay, compensations), got %v", other)
+	if other := tenant.ServiceGrantTable()[target.ServiceName]; len(other) != 6 {
+		t.Errorf("migration-factory is granted only receivables, payables (opening items), inventory and treasury (opening imports), ledger (replay, compensations) and migration (cross-reference read), got %v", other)
 	}
 }

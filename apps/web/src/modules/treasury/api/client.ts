@@ -493,7 +493,7 @@ export interface BankReconciliation {
   closingBalance: string;
   bookBalance: string;
   outstandingAmount: string;
-  bookBalanceSource?: "stated";
+  bookBalanceSource?: "stated" | "opening";
   bookBalanceStatedBy?: string;
   bookBalanceStatedAt?: string;
   /** closing - (book + outstanding + excluded lines); zero to close. */
@@ -551,8 +551,11 @@ export function getBankReconciliation(id: string, signal?: AbortSignal): Promise
 
 export interface OpenReconInput {
   statementId: string;
-  bookBalance: string;
+  /** Required unless bookBalanceSource is "opening". */
+  bookBalance?: string;
   outstandingAmount?: string;
+  /** "opening" starts the account's first reconciliation from the opening book balance the migration loaded. */
+  bookBalanceSource?: "stated" | "opening";
 }
 
 export function createBankReconciliation(input: OpenReconInput, key: string = newKey()): Promise<BankReconciliation> {
@@ -612,7 +615,7 @@ export interface AccountPositionRow {
   /** Signed decimal strings. */
   booked: string;
   available: string;
-  source: "camt.052" | "camt.053" | "none";
+  source: "camt.052" | "camt.053" | "opening" | "none";
   asOf?: string;
   stale: boolean;
 }

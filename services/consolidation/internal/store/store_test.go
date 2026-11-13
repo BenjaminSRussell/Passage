@@ -388,3 +388,42 @@ func TestCreateCollection_RefusesLinesOfAUnitThatLeftOrChangedCurrencyMeanwhile(
 		t.Fatalf("remove a collected unit: %v; want %s", err, domain.CodeUnitInUse)
 	}
 }
+
+// The pair accounts of a unit's terms and a foreign associate's carrying amount in its own currency survive the round trip.
+func TestStore_PairAccountsAndForeignAssociateRegister(t *testing.T) {
+	s, _, ctx := setup(t)
+	g, _, err := s.CreateGroup(ctx, domain.Group{Code: "PAIR", Name: "Pair group", Currency: "USD"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := s.AddUnit(ctx, g.ID, domain.Unit{LegalEntityID: ids.New(), LedgerID: "L-1", Currency: "EUR"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terms := domain.UnitTerms{HistoricalRate: dec("1.1"), ICReceivableAccount: "1310", ParentPayableAccount: "2310"}
+	if _, err := s.SetUnitTerms(ctx, g.ID, u.ID, terms); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetUnitTerms(ctx, g.ID)
+	if err != nil || got[u.ID].ICReceivableAccount != "1310" || got[u.ID].ParentPayableAccount != "2310" {
+		t.Fatalf("terms = %+v, %v", got[u.ID], err)
+	}
+	in := domain.RunInput{GroupID: "PAIR", Period: "2027-03", Currency: "USD", Associates: []domain.RunAssociate{{ID: "A1", Cost: dec("330000"), Associate: domain.Associate{
+		Currency: "USD", OwnershipPct: dec("30"), OpeningCarrying: dec("330000"), NetIncome: dec("224000"), DividendsReceived: dec("16800"),
+		Foreign: &domain.ForeignAssociate{UnitCurrency: "EUR", OpeningCarrying: dec("300000"), NetIncome: dec("200000"), Dividends: dec("15000"),
+			OpeningRate: dec("1.10"), AverageRate: dec("1.12"), ClosingRate: dec("1.15")}}}}}
+	rec, _, err := start(t, s, ctx, in, "fx-assoc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := s.RunInvestments(ctx, rec.ID)
+	if err != nil || len(reg) != 1 {
+		t.Fatalf("register = %+v, %v", reg, err)
+	}
+	if l := reg[0]; l.UnitCurrency != "EUR" || !l.ClosingCarryingUnit.Equal(dec("345000")) || !l.FXDifference.Equal(dec("16350")) || !l.ClosingCarrying.Equal(dec("396750")) {
+		t.Fatalf("line = %+v", l)
+	}
+	if !rec.CTA.Equal(dec("16350")) {
+		t.Fatalf("cta = %s, want the associate's 16350", rec.CTA)
+	}
+}

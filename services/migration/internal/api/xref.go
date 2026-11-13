@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -11,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/migration/internal/store"
 )
@@ -31,6 +33,66 @@ type xrefView struct {
 func (a *API) registerXref(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRun)).Get(xrefPath, a.listXref)
 	r.With(authz.RequireDuty(dutyRun)).Get(xrefPath+"/summary", a.xrefSummary)
+	r.With(authz.RequireDuty(store.DutyXrefRead)).Get(xrefPath+":resolve", a.resolveXref)
+}
+
+// maxResolveKeys bounds one resolve request.
+const maxResolveKeys = 500
+
+// resolveXref answers GET /v1/integration/xref:resolve?sourceSystem=&entity=&keys=k1,k2: the Passage id of each legacy key this
+// service loaded, for a loading service that must not be sent the mapping by hand (#49, H-S8-6: the migration factory resolves a
+// legacy customer of an open item to the customer the party migration loaded). Service-only; the token's legal-entity scope
+// applies, so a customer of another legal entity is not found.
+func (a *API) resolveXref(w http.ResponseWriter, r *http.Request) {
+	if p, ok := tenant.FromContext(r.Context()); !ok || !ids.Valid(p.TenantID) {
+		fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
+		return
+	}
+	q := r.URL.Query()
+	bad := map[string]string{}
+	system, entity := q.Get("sourceSystem"), q.Get("entity")
+	if system == "" || len(system) > 64 {
+		bad["sourceSystem"] = "is required (1 to 64 characters)"
+	}
+	if entity == "" || len(entity) > 64 {
+		bad["entity"] = "is required (1 to 64 characters)"
+	}
+	var keys []string
+	for _, k := range strings.Split(q.Get("keys"), ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			if len(k) > 255 {
+				bad["keys"] = "each key is at most 255 characters"
+			}
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 || len(keys) > maxResolveKeys {
+		bad["keys"] = "must name 1 to 500 keys, separated by commas"
+	}
+	if len(bad) > 0 {
+		fail(w, r, validation(bad))
+		return
+	}
+	found, err := a.store.ResolveXref(r.Context(), system, entity, keys)
+	if err != nil {
+		a.logFailure(r, "resolve xref failed", err)
+		fail(w, r, err)
+		return
+	}
+	type resolved struct {
+		SourceKey string `json:"sourceKey"`
+		TargetID  string `json:"targetId"`
+	}
+	out := struct {
+		Items []resolved `json:"items"`
+	}{Items: make([]resolved, 0, len(found))}
+	for _, k := range keys {
+		if id, ok := found[k]; ok {
+			out.Items = append(out.Items, resolved{SourceKey: k, TargetID: id})
+			delete(found, k)
+		}
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 func encodeCursor(c store.XrefCursor) string {

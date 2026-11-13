@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -33,6 +35,7 @@ type StockTarget interface {
 	Configured() bool
 	LoadBatch(ctx context.Context, tenantID, legalEntityID, batchKey, postingDate, currency string, items []domain.StockItem) (target.OpeningBatchResult, error)
 	BatchTotals(ctx context.Context, tenantID, legalEntityID string, keep func(key string) bool) (domain.OpeningTotals, error)
+	OnHand(ctx context.Context, tenantID, legalEntityID string, products []string) (map[string]decimal.Decimal, error)
 }
 
 // BankTarget is treasury, where the staged opening bank balances are loaded; *target.Treasury implements it.
@@ -149,7 +152,7 @@ type openingChunk struct {
 	hashes   []string
 	currency string
 	// planned chunks come from opening_load_batch: they keep their key and date, and are not planned again.
-	planned bool
+	planned  bool
 	fixedKey string
 	date     string
 }
@@ -301,6 +304,11 @@ func (s *Server) runOpeningLoad(w http.ResponseWriter, r *http.Request) {
 		fin.Actual, err = s.openingTotals(ctx, p.TenantID, load.LegalEntityID, opened)
 		if err != nil {
 			fin.ActualErr = err.Error()
+		} else if opened.Pack == domain.PackOnhand {
+			// BR-49.3 against the ledger's own inquiry (H-S9-2): read back what is on hand for every product the batches loaded.
+			if fin.OnHand, err = s.onHandReadBack(ctx, p.TenantID, load.LegalEntityID); err != nil {
+				fin.ActualErr = "the on-hand read-back failed: " + err.Error()
+			}
 		}
 	}
 	done, _, err := s.store.FinishOpeningLoad(ctx, id, fin)
@@ -321,6 +329,19 @@ func (s *Server) runOpeningLoad(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) abandonOpening(ctx context.Context, runID string, cause error) {
 	_, _, _ = s.store.FinishOpeningLoad(context.WithoutCancel(ctx), runID, store.OpeningFinish{Unavailable: cause.Error(), ActualErr: cause.Error()})
+}
+
+func (s *Server) onHandReadBack(ctx context.Context, tenantID, legalEntityID string) (map[string]decimal.Decimal, error) {
+	loaded, err := s.store.OpeningOnHandExpected(ctx, legalEntityID)
+	if err != nil {
+		return nil, err
+	}
+	products := make([]string, 0, len(loaded))
+	for p := range loaded {
+		products = append(products, p)
+	}
+	sort.Strings(products)
+	return s.inventory.OnHand(ctx, tenantID, legalEntityID, products)
 }
 
 func (s *Server) openingTotals(ctx context.Context, tenantID, legalEntityID string, run store.OpeningRun) (domain.OpeningTotals, error) {

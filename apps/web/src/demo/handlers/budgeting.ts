@@ -312,10 +312,125 @@ route("POST", `${BASE}/plans/{id}/scenarios/{sid}:spread`, ({ params, body, head
   });
 });
 
+// The drivers plan generation reads (FR-38.14): the depreciation of the open fixed assets, the HR positions, project forecasts
+// and the planning demand forecast. Fictional Cedar Ridge Pumps figures; the routes the browser reads (projects and their
+// forecasts) are served below, the rest stay inside this handler as the budgeting service would read them server side.
+const K_PROJECT_MODEL = 1901;
+const demoProjects = [
+  { id: "P-1001", legalEntityId: LEGAL_ENTITY.id, projectGroupId: "CAPEX", projectType: "INTERNAL", currency: "USD", contractValue: "0", stage: "IN_PROCESS", startDate: `${YEAR - 1}-09-01`, version: 3, createdAt: at(-120), updatedAt: at(-6) },
+  { id: "P-2040", legalEntityId: LEGAL_ENTITY.id, projectGroupId: "CUST", projectType: "FIXED_PRICE", currency: "USD", contractValue: "480000", stage: "IN_PROCESS", startDate: `${YEAR - 1}-11-15`, version: 5, createdAt: at(-60), updatedAt: at(-2) },
+];
+const demoForecasts = [
+  { id: uid(K_PROJECT_MODEL, 1), projectId: "P-1001", name: "Test bay rebuild", currency: "USD", version: 2, lineCount: 6, months: [3, 4, 5, 6, 7, 8], cost: 18_500, sales: 0 },
+  { id: uid(K_PROJECT_MODEL, 2), projectId: "P-2040", name: "Municipal pump station", currency: "USD", version: 4, lineCount: 8, months: [2, 3, 4, 5, 6, 7, 8, 9], cost: 41_000, sales: 60_000 },
+];
+// Open positions: job, department (an operating unit), FTE and the month the position opens.
+const demoPositions = [
+  { jobCode: "ASSEMBLER", departmentId: uid(K_UNIT, 1), fte: 6, from: 1 },
+  { jobCode: "TECHNICIAN", departmentId: uid(K_UNIT, 1), fte: 2, from: 4 },
+  { jobCode: "PICKER", departmentId: uid(K_UNIT, 2), fte: 4, from: 1 },
+  { jobCode: "CONTROLLER", departmentId: uid(K_UNIT, 3), fte: 1, from: 1 },
+];
+const monthlyDepreciation = [4_250, 4_250, 4_250, 4_250, 4_610, 4_610, 4_610, 4_610, 4_610, 4_610, 4_980, 4_980];
+const demandUnits = [38, 36, 44, 52, 60, 66, 64, 58, 50, 46, 40, 34];
+
+route("GET", "/api/v1/projects", ({ query }) => ({ items: demoProjects.filter((p) => !query.get("stage") || p.stage === query.get("stage")) }));
+route("GET", "/api/v1/projects/{id}", ({ params }) => demoProjects.find((p) => p.id === params.id) ?? reply.problem(404, "PRJ-0404", "No project with that id"));
+route("GET", "/api/v1/projects/{id}/forecasts", ({ params }) => {
+  if (!demoProjects.some((p) => p.id === params.id)) return reply.problem(404, "PRJ-0404", "No project with that id");
+  return {
+    items: demoForecasts
+      .filter((f) => f.projectId === params.id)
+      .map(({ months, cost, sales, ...f }) => ({ ...f, totalCost: dec(months.length * cost * 10_000), totalSales: dec(months.length * sales * 10_000), createdBy: "ana.ortiz", createdAt: at(-30) })),
+  };
+});
+
+interface GenerateBody {
+  source: "prior-plan" | "gl-actuals" | "fixed-assets" | "positions" | "projects" | "demand";
+  adjustmentPct?: string;
+  accounts?: string[];
+  costCenters?: { costCenter: string; weight: string }[];
+  account?: string;
+  book?: string;
+  rates?: { jobCode: string; monthlyCost: string }[];
+  departments?: { departmentId: string; costCenter: string }[];
+  projects?: { projectId: string; modelId: string; costCenter: string; amount?: "cost" | "sales" }[];
+  modelCode?: string;
+  unitPrices?: { itemId: string; price: string }[];
+}
+
+/** The cells of a driver source: amounts per month (in units) on the request's account, by cost center. */
+function driverCells(input: GenerateBody, factor: number): PlanCell[] | ReturnType<typeof reply.problem> {
+  const account = input.account ?? "";
+  const byCenter = new Map<string, number[]>();
+  const add = (center: string, month: number, amount: number) => {
+    const row = byCenter.get(center) ?? Array(12).fill(0);
+    row[month] += amount;
+    byCenter.set(center, row);
+  };
+  const share = (monthly: number[]) => {
+    const centers = input.costCenters ?? [];
+    const sum = centers.reduce((s, c) => s + Number(c.weight), 0);
+    if (sum <= 0) return reply.problem(422, "BUD-0060", "the cost center weights sum to zero");
+    for (const c of centers) monthly.forEach((m, i) => add(c.costCenter, i, (m * Number(c.weight)) / sum));
+    return null;
+  };
+  switch (input.source) {
+    case "fixed-assets": {
+      const refused = share(monthlyDepreciation.map((m) => m * 10_000));
+      if (refused) return refused;
+      break;
+    }
+    case "demand": {
+      if (input.modelCode !== `FC-${YEAR}`) return reply.problem(422, "BUD-0064", `planning has no forecast ${input.modelCode ?? ""}; the demo holds FC-${YEAR}`);
+      const unitPrice = (input.unitPrices ?? []).reduce((s, p) => s + units(p.price), 0);
+      const refused = share(demandUnits.map((q) => q * unitPrice));
+      if (refused) return refused;
+      break;
+    }
+    case "positions": {
+      const rates = new Map((input.rates ?? []).map((r) => [r.jobCode, units(r.monthlyCost)]));
+      const centers = new Map((input.departments ?? []).map((d) => [d.departmentId, d.costCenter]));
+      for (const p of demoPositions) {
+        const rate = rates.get(p.jobCode);
+        if (rate === undefined) return reply.problem(422, "BUD-0064", `no monthly cost is given for job ${p.jobCode}`);
+        const center = centers.get(p.departmentId);
+        if (center === undefined) {
+          const unit = orgUnits.find((u) => u.id === p.departmentId);
+          return reply.problem(422, "BUD-0065", `the HR department ${unit?.name ?? p.departmentId} has no cost center in the request`);
+        }
+        for (let m = p.from - 1; m < 12; m++) add(center, m, p.fte * rate);
+      }
+      break;
+    }
+    case "projects":
+      for (const row of input.projects ?? []) {
+        const model = demoForecasts.find((f) => f.id === row.modelId && f.projectId === row.projectId);
+        if (!model) return reply.problem(422, "BUD-0064", `project ${row.projectId} has no such forecast`);
+        for (const m of model.months) add(row.costCenter, m - 1, (row.amount === "sales" ? model.sales : model.cost) * 10_000);
+      }
+      break;
+    default:
+      return [];
+  }
+  const made: PlanCell[] = [];
+  for (const [costCenter, months] of byCenter) {
+    months.forEach((amount, i) => {
+      if (amount !== 0) made.push({ account, costCenter, period: periods[i], amount: dec(Math.round(amount * factor)) });
+    });
+  }
+  if (made.length === 0) return reply.problem(422, "BUD-0061", "the source holds no amounts for the plan year");
+  return made;
+}
+
 route("POST", `${BASE}/plans/{id}/scenarios/{sid}:generate`, ({ params, body, headers }) => {
-  const input = body as { source: "prior-plan" | "gl-actuals"; adjustmentPct?: string; accounts?: string[]; costCenters?: { costCenter: string; weight: string }[] };
+  const input = body as GenerateBody;
   return write(params.id, params.sid, headers, (existing) => {
     const factor = 1 + Number(input.adjustmentPct ?? 0) / 100;
+    if (input.source !== "prior-plan" && input.source !== "gl-actuals") {
+      const made = driverCells(input, factor);
+      return Array.isArray(made) ? upsert(existing, made) : made;
+    }
     const wanted = new Set(input.accounts ?? []);
     const lastYear = (cells.get(uid(K_SCENARIO, 3)) ?? []).filter((c) => wanted.size === 0 || wanted.has(c.account));
     if (lastYear.length === 0) return reply.problem(422, "BUD-0061", "no approved plan of the previous fiscal year holds amounts for these accounts");
