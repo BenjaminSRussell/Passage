@@ -13,7 +13,30 @@ const (
 	dutyXrefRead     = "migration.xref.read"
 	pathXrefResolve  = "/v1/integration/xref:resolve"
 	maxXrefKeysAsked = 500
+	// maxXrefQueryBytes bounds the encoded keys of one request, so a lookup stays under the request-line limits of proxies and
+	// ingresses (often 8 KiB) whatever the length of the legacy keys.
+	maxXrefQueryBytes = 6000
 )
+
+// xrefChunks splits the keys into requests of at most maxXrefKeysAsked keys and maxXrefQueryBytes encoded bytes each.
+func xrefChunks(keys []string) [][]string {
+	var out [][]string
+	var cur []string
+	size := 0
+	for _, k := range keys {
+		n := len(url.QueryEscape(k)) + 3 // the encoded comma between keys
+		if len(cur) > 0 && (len(cur) == maxXrefKeysAsked || size+n > maxXrefQueryBytes) {
+			out = append(out, cur)
+			cur, size = nil, 0
+		}
+		cur = append(cur, k)
+		size += n
+	}
+	if len(cur) > 0 {
+		out = append(out, cur)
+	}
+	return out
+}
 
 // Xref resolves legacy keys through the migration service's cross-reference (services/migration, H-S8-6): the Passage ids the
 // party migration loaded, so an open item's legacy customer needs no hand-made map.
@@ -30,14 +53,13 @@ func NewXref(cfg Config) *Xref {
 func (x *Xref) Configured() bool { return x != nil && x.c.Configured() }
 
 // Resolve returns the Passage id of each key of the entity from the source system that the cross-reference holds, within the
-// legal entity's scope; keys it does not hold are left out. Keys are sent 500 to a request.
+// legal entity's scope; keys it does not hold are left out. Keys are sent up to 500 (and about 6 KB encoded) to a request.
 func (x *Xref) Resolve(ctx context.Context, tenantID, legalEntityID, system, entity string, keys []string) (map[string]string, error) {
 	if !x.Configured() {
 		return nil, ErrNotConfigured
 	}
 	out := map[string]string{}
-	for start := 0; start < len(keys); start += maxXrefKeysAsked {
-		chunk := keys[start:min(start+maxXrefKeysAsked, len(keys))]
+	for _, chunk := range xrefChunks(keys) {
 		q := url.Values{"sourceSystem": {system}, "entity": {entity}, "keys": {strings.Join(chunk, ",")}}
 		status, body, err := x.c.do(ctx, http.MethodGet, pathXrefResolve+"?"+q.Encode(), tenantID, legalEntityID, dutyXrefRead, "", nil)
 		if err != nil {
