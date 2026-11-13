@@ -11,7 +11,7 @@ The back end of `apps/supplier-portal`. TypeScript on Node 24 (types stripped, n
 | `src/session.ts` | In-memory sessions behind an HttpOnly `__Host-` cookie (30 min idle, 8 h absolute), single-use login state, CSRF token, per-session rate limit |
 | `src/serviceToken.ts` | Signs service tokens (Ed25519, `platform/go/tenant` format) with `iss: supplier-portal`, the session's tenant and one legal entity, `act` = user, and `vnd` = the vendor. Grants: the vendor-portal duties on purchasing, receiving and party only |
 | `src/routes.ts` | The table of `/api/v1/*` routes and the one upstream call each becomes. Nothing else is proxied |
-| `src/server.ts` | `/bff/login`, `/bff/callback`, `/bff/me`, `/bff/logout`, `/healthz`, `/readyz`, the `/api/v1` proxy, and the public routes below |
+| `src/server.ts` | `/bff/login`, `/bff/callback`, `/bff/me`, `/bff/logout`, `/bff/backchannel-logout` (Keycloak's back-channel logout), `/healthz`, `/readyz`, the `/api/v1` proxy, and the public routes below |
 | `src/scan.ts` | The upload scanner interface, a ClamAV adapter (clamd INSTREAM over TCP) and a fake; `screenUpload` applies the policy |
 | `src/provision.ts` | The `UserProvisioner` interface for the identity-provider user of an accepted invitation, the default `PendingProvisioner`, and a fake |
 

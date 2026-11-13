@@ -12,6 +12,7 @@ paths:
   /bff/callback: { get: { summary: Finish the sign-in and set the session cookie, parameters: [ { name: code, in: query, schema: { type: string } }, { name: state, in: query, schema: { type: string } } ], responses: { '302': { description: Signed in }, '400': { description: Unknown or expired sign-in }, '403': { description: Not a supplier account } } } }
   /bff/me: { get: { summary: The signed-in user and the CSRF token, responses: { '200': { description: OK }, '401': { description: No session } } } }
   /bff/logout: { post: { summary: End the session, responses: { '204': { description: Signed out }, '403': { description: CSRF } } } }
+  /bff/backchannel-logout: { post: { summary: 'OIDC back-channel logout from Keycloak (form field logout_token); ends the portal sessions of that Keycloak session or user', responses: { '200': { description: Ended }, '400': { description: The logout token is not valid } } } }
   /api/v1/purchase-orders: { get: { summary: The vendor's purchase orders, x-upstream: purchasing GET /v1/procurement/vendor/purchase-orders, responses: { '200': { description: OK } } } }
   /api/v1/purchase-orders/{id}: { get: { summary: One purchase order, responses: { '200': { description: OK }, '404': { description: Not found or not the vendor's } } } }
   /api/v1/purchase-orders/{id}/acknowledgements: { post: { summary: Accept, reject or propose changes, responses: { '200': { description: OK } } } }
