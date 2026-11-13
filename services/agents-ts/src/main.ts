@@ -6,7 +6,7 @@ import { createAuthenticator } from "./api/auth.js";
 import type { AgentsApiDeps } from "./api/router.js";
 import { createProviderFactory, loadConfig, type Config } from "./config.js";
 import { CopilotAnswerCache } from "./domain/copilot.js";
-import { KillSwitchRegistry } from "./domain/killswitch.js";
+import { KILL_PROPAGATION_MS, KillSwitchRegistry } from "./domain/killswitch.js";
 import { createLogger } from "./logging/pseudonymize.js";
 import { createCopilotService } from "./runtime/copilot.js";
 import { createKnowledgeService } from "./runtime/knowledge.js";
@@ -34,8 +34,9 @@ async function main(): Promise<void> {
   const cfg = loadConfig(process.env);
   const { pool, store } = await openAgentStore(process.env);
   const inbox = new PgApprovalStore(store);
-  const registry = new KillSwitchRegistry(() => Date.now());
-  // Every pod polls kill_switch_change (AC-47.6); a pod that cannot read it for 10 s fails closed.
+  // Every pod polls kill_switch_change (AC-47.6); a pod that cannot read it for 10 s fails closed, and a pod that has
+  // not read it yet is closed from the start (and not ready).
+  const registry = new KillSwitchRegistry(() => Date.now(), KILL_PROPAGATION_MS, { startSynced: false });
   const killLog = new PgKillSwitchLog(store, pool);
   const killPoller = new KillSwitchPoller(killLog, registry, (err) => log("warn", "kill switch poll failed", { error: String(err) }));
   await killPoller.start(cfg.killSwitchPollMs);

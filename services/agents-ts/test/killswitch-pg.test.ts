@@ -182,6 +182,29 @@ describe.runIf(ownerUrl)("kill switch shared through Postgres (AC-47.6)", () => 
     expect(registry.isHalted(t)).toBe(false);
   });
 
+  it("a starting pod whose first poll fails stays closed and keeps polling until a read succeeds", async () => {
+    const t = nextTenant();
+    const registry = new KillSwitchRegistry(() => Date.now(), KILL_PROPAGATION_MS, { startSynced: false });
+    let broken = true;
+    const errors: unknown[] = [];
+    const poller = new KillSwitchPoller(
+      { changesSince: (v) => (broken ? Promise.reject(new Error("connection refused")) : log.changesSince(v)) },
+      registry,
+      (err) => errors.push(err),
+    );
+    await poller.start(100);
+    try {
+      expect(errors).toHaveLength(1);
+      expect(registry.isHalted(t)).toBe(true);
+      broken = false;
+      const deadline = Date.now() + 5_000;
+      while (registry.isHalted(t) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      expect(registry.isHalted(t)).toBe(false);
+    } finally {
+      poller.stop();
+    }
+  });
+
   it("start polls at once and keeps polling until stopped", async () => {
     const t = nextTenant();
     const registry = new KillSwitchRegistry(() => Date.now());
