@@ -377,7 +377,8 @@ func (a *API) listLicenses(w http.ResponseWriter, r *http.Request) {
 // ---- The hourly checks ----
 
 // RunChecks runs the licence check and, when an SLO source is configured, the SLO check once now and then every interval until
-// ctx ends. Each replica runs it; both checks are idempotent (a state change is written once, under a row lock).
+// ctx ends. Each replica runs it; both checks are idempotent: each state row is created before it is locked, so a state change
+// is written once even when replicas check at the same moment.
 func (a *API) RunChecks(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()

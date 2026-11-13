@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
@@ -130,6 +131,17 @@ func requestHash(req domain.ProvisionRequest) string {
 // CreateProvision records a validated provision. The same Idempotency-Key with the same request returns the first record
 // (replay true); the same key with another request, or a tenant already provisioned under another key, is OPS-1723.
 func (s *Postgres) CreateProvision(ctx context.Context, key string, req domain.ProvisionRequest, user string) (Provision, bool, error) {
+	p, replay, err := s.createProvision(ctx, key, req, user)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		// A concurrent first request with the same key or tenant committed between the lookup and the insert: look again, so
+		// this one is answered as a replay or OPS-1723 rather than a server error.
+		p, replay, err = s.createProvision(ctx, key, req, user)
+	}
+	return p, replay, err
+}
+
+func (s *Postgres) createProvision(ctx context.Context, key string, req domain.ProvisionRequest, user string) (Provision, bool, error) {
 	hash := requestHash(req)
 	var replay bool
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -151,6 +163,10 @@ func (s *Postgres) CreateProvision(ctx context.Context, key string, req domain.P
 			values ($1::uuid, $2, $3, $4, $5, $6, $7, $8)`, req.TenantID, req.Name, req.Residency, req.Region, req.Tier, key, hash, user)
 		return err
 	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return Provision{}, false, err
+	}
 	if err != nil {
 		return Provision{}, false, Problem(err)
 	}
@@ -252,7 +268,9 @@ func (s *Postgres) RecordProvisionStep(ctx context.Context, tenantID, action, st
 			return err
 		}
 		if status == "FAILED" {
-			_, err := tx.Exec(ctx, `update ops_tenant_provision set status = 'FAILED' where customer_tenant = $1::uuid and status = 'PROVISIONING'`, tenantID)
+			// A late FAILED for a step already DONE leaves the step DONE (above) and the provision as it is.
+			_, err := tx.Exec(ctx, `update ops_tenant_provision set status = 'FAILED' where customer_tenant = $1::uuid and status = 'PROVISIONING'
+				and exists (select 1 from ops_tenant_provision_step where customer_tenant = $1::uuid and status = 'FAILED')`, tenantID)
 			return err
 		}
 		var done int
@@ -435,8 +453,12 @@ func (s *Postgres) CheckLicenses(ctx context.Context, now time.Time) (int, error
 		err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 			var full *int
 			var last *string
-			err := tx.QueryRow(ctx, `select active_full, last_state from ops_license_check where licensee_id = $1::uuid for update`, rec.License.TenantID).Scan(&full, &last)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			// The row is created first so that the lock below always holds one: a second replica checking the same licence waits
+			// here and then sees this check's state, instead of reporting the same change again.
+			if _, err := tx.Exec(ctx, `insert into ops_license_check (licensee_id) values ($1::uuid) on conflict (licensee_id) do nothing`, rec.License.TenantID); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `select active_full, last_state from ops_license_check where licensee_id = $1::uuid for update`, rec.License.TenantID).Scan(&full, &last); err != nil {
 				return err
 			}
 			st, err := domain.EvaluateLicense(rec.License, deref(full), now)
@@ -514,8 +536,12 @@ func (s *Postgres) RecordSLO(ctx context.Context, rep *domain.SLOReport) (int, e
 			line := &rep.Services[i]
 			var since *time.Time
 			var was bool
-			err := tx.QueryRow(ctx, `select breached, breached_since from ops_slo_state where service = $1 for update`, line.Service).Scan(&was, &since)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			// As in CheckLicenses: create the row first so the lock always holds one and a concurrent check reports a breach once.
+			if _, err := tx.Exec(ctx, `insert into ops_slo_state (service, breached, checked_at, last_window) values ($1, false, $2, $3)
+				on conflict (service) do nothing`, line.Service, rep.GeneratedAt, rep.Window); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `select breached, breached_since from ops_slo_state where service = $1 for update`, line.Service).Scan(&was, &since); err != nil {
 				return err
 			}
 			if line.Breached && !was {
