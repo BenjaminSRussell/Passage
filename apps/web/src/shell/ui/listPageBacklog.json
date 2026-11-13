@@ -1,14 +1,5 @@
 {
   "pages": [
-    "modules/purchasing/AgreementPages.tsx",
-    "modules/purchasing/ApprovalPages.tsx",
-    "modules/purchasing/CatalogImportPages.tsx",
-    "modules/purchasing/CatalogPages.tsx",
-    "modules/purchasing/CategoryPages.tsx",
-    "modules/purchasing/ChargePages.tsx",
-    "modules/purchasing/InboundPages.tsx",
-    "modules/purchasing/PolicyPages.tsx",
-    "modules/purchasing/ReleasePages.tsx",
     "modules/purchasing/RequisitionPages.tsx",
     "modules/purchasing/RfqPages.tsx",
     "modules/purchasing/RfqTypePages.tsx",

@@ -56,13 +56,14 @@ describe("vendor import list", () => {
     expect(await screen.findByRole("heading", { name: "No vendor imports yet" })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "COMMITTED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(String(mock.mock.calls.at(-1)?.[0])).toBe(`${BASE}/catalog-imports?status=COMMITTED`));
   });
 
   it("shows the problem code on error and retries", async () => {
-    const mock = stubFetch(() => problem(403, "AUTH-0003", "missing duty"));
+    const mock = stubFetch(() => problem(500, "PRC-0500", "store unavailable"));
     renderAt("/purchasing/catalog-imports");
-    expect(await screen.findByText(/missing duty/)).toBeInTheDocument();
+    expect(await screen.findByText(/PRC-0500/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(mock.mock.calls.length).toBeGreaterThan(1));
   });

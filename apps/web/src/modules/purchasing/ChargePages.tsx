@@ -12,7 +12,6 @@ import {
   Select,
   Skeleton,
   buttonClassName,
-  type DataTableColumn,
   ListPage,
   type ListColumn,
   type ListData,
