@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -38,6 +39,10 @@ func receiveEdifactBody(t *testing.T, h http.Handler, body string) {
 func sendShipment(t *testing.T, f *fakeSources, h http.Handler, partner, id, number string, shippedOn time.Time) {
 	t.Helper()
 	f.shipment.ID, f.shipment.ShipmentNumber, f.shipment.ActualShipDate = id, number, &shippedOn
+	// Every shipment's containers have their own SSCCs, as real ones do: a container is notified to a partner once.
+	for i := range f.shipment.Containers {
+		f.shipment.Containers[i].SSCC = testSSCC(fmt.Sprintf("0034567%06d%04d", len(number)*1000+int(number[len(number)-1]), i))
+	}
 	if rec := fromSource(t, h, partner, "856", id); rec.Code != http.StatusCreated {
 		t.Fatalf("856 %s: %d %s", number, rec.Code, rec.Body.String())
 	}
@@ -264,4 +269,17 @@ func TestSelfBilling_ScheduledSweepOpensTheUnbilledDisputeOnce(t *testing.T) {
 	if tenants, err := a.store.SelfBillDueTenants(context.Background()); err != nil || len(tenants) != 0 {
 		t.Fatalf("nothing is due after the sweep: %v %v", tenants, err)
 	}
+}
+
+// testSSCC appends the GS1 mod-10 check digit to 17 digits.
+func testSSCC(body string) string {
+	sum := 0
+	for i := 0; i < len(body); i++ {
+		d := int(body[len(body)-1-i] - '0')
+		if i%2 == 0 {
+			d *= 3
+		}
+		sum += d
+	}
+	return body + string(rune('0'+(10-sum%10)%10))
 }

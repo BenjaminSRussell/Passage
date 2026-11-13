@@ -38,6 +38,7 @@ type fakeStore struct {
 	afilter  store.AppointmentFilter
 	receipt  domain.Receipt
 	rfilter  store.ReceiptFilter
+	ship     store.ShipConfirmation
 	receive  store.ReceiveInput
 	received store.Received
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
@@ -61,18 +62,21 @@ func (s *Postgres) UpdateRequisition(ctx context.Context, id string, version int
 			for _, l := range edit.Lines {
 				if _, err := tx.Exec(ctx, `insert into purchase_requisition_line (tenant_id, id, requisition_id, line_no, product_id, description,
 					category, qty, unit, estimated_unit_price, amount, requested_date, site_id, preferred_vendor_id, status, catalog_entry_id, warehouse_id,
-					gl_account, cost_center)
-					values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'OPEN', $15, $16, $17, $18)`,
+					gl_account, cost_center, catalog_source, supplier_part_id, needs_approval)
+					values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'OPEN', $15, $16, $17, $18, $19, $20, $21)`,
 					p.TenantID, ids.New(), id, l.LineNo, nullable(l.ProductID), l.Description, l.Category, l.Qty, l.Unit,
 					l.EstimatedUnitPrice, l.Amount, l.RequestedDate.Time, nullable(l.SiteID), nullable(l.PreferredVendorID),
-					nullable(l.CatalogEntryID), nullable(l.WarehouseID), nullable(l.GLAccount), nullable(l.CostCenter)); err != nil {
+					nullable(l.CatalogEntryID), nullable(l.WarehouseID), nullable(l.GLAccount), nullable(l.CostCenter),
+					nullable(l.CatalogSource), nullable(l.SupplierPartID), l.NeedsApproval); err != nil {
 					return err
 				}
 			}
 		}
+		// A flagged punchout line marks the requisition for good (BR-35.13): an edit can set needs_approval, never clear it.
+		flagged := slices.ContainsFunc(edit.Lines, func(l RequisitionLine) bool { return l.NeedsApproval })
 		tag, err := tx.Exec(ctx, `update purchase_requisition set operating_unit_id = $3, currency = $4, total = $5, version = version + 1,
-			updated_at = now() where tenant_id = $1 and id = $2 and version = $6`,
-			p.TenantID, id, nullable(edit.OperatingUnitID), currency, total, version)
+			needs_approval = needs_approval or $7, updated_at = now() where tenant_id = $1 and id = $2 and version = $6`,
+			p.TenantID, id, nullable(edit.OperatingUnitID), currency, total, version, flagged)
 		if err != nil {
 			return err
 		}

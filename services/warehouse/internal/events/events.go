@@ -17,10 +17,13 @@ var (
 	WorkCompleted     = events.Type(Context, "work", "completed", 1)
 	WorkReleased      = events.Type(Context, "work", "released", 1)
 	ReceiptRegistered = events.Type(Context, "receipt", "registered", 1)
+	ShipmentShipped   = events.Type(Context, "shipment", "shipped", 1)
 )
 
 // All lists every published type; asyncapi.yaml must name each one.
-func All() []string { return []string{WorkCreated, WorkCompleted, WorkReleased, ReceiptRegistered} }
+func All() []string {
+	return []string{WorkCreated, WorkCompleted, WorkReleased, ReceiptRegistered, ShipmentShipped}
+}
 
 // Line is one line of a work event.
 type Line struct {
@@ -93,4 +96,23 @@ type ReceiptRegisteredData struct {
 	Discrepancy bool      `json:"discrepancy"`
 	WorkID      string    `json:"work_id"`
 	User        string    `json:"user"`
+}
+
+// ShippedContainer is one container (pallet or carton) that left on the truck, by its SSCC.
+type ShippedContainer struct {
+	SSCC string `json:"sscc"`
+}
+
+// ShipmentShippedData is the payload of dev.passage.wms.shipment.shipped.v1, emitted when the warehouse confirms that an
+// outbound shipment left the dock without a packing slip posted for it (#35, 35-1): the EDI engine sends the 856 or DESADV of
+// the whole shipment from it, as it does from fulfillment's asn.issued for a slip. ShipmentID is the fulfillment shipment;
+// Containers, when given, are the SSCCs that left (otherwise every closed container of the shipment did).
+type ShipmentShippedData struct {
+	ShipmentID    string             `json:"shipment_id"`
+	LegalEntityID string             `json:"legal_entity_id"`
+	WarehouseID   string             `json:"warehouse_id"`
+	CarrierCode   string             `json:"carrier_code,omitempty"`
+	ShippedAt     string             `json:"shipped_at"`
+	Containers    []ShippedContainer `json:"containers"`
+	User          string             `json:"user"`
 }

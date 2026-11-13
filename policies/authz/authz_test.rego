@@ -92,7 +92,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "edi.outbound.from-event", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "revrec.creditnote.reverse", "revrec.contract.from-invoice", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
+	flag_duties := {"receivables.write-off.approve", "purchasing.inbound.apply", "edi.pii.view", "edi.outbound.from-event", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "billing.iccharge.from-event", "payables.iccharge.from-event", "revrec.creditnote.reverse", "revrec.contract.from-invoice", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -765,6 +765,8 @@ test_edi_source_read_duties_open_only_their_get_routes if {
 		"sales": ["sales.order.lookup", "sales.channel.intake"],
 		"purchasing": ["procurement.requisition.create", "procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"],
 		"receiving": ["receiving.asn.maintain"],
+		"payables": ["payables.vendor-invoice.intake"],
+		"tax": ["tax.tax.calculate"],
 	}
 	every duty in ["fulfillment.shipment.read", "billing.invoice.read", "sales.order.lookup", "sales.channel.intake"] {
 		data.duties[duty].service_only
@@ -2773,7 +2775,7 @@ test_edi_b2b_routes_belong_to_their_duties if {
 
 test_edi_cxml_grants_are_narrow if {
 	data.service_grants.edi.receiving == ["receiving.asn.maintain"]
-	data.service_principals["edi-cxml"] == ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain"]
+	data.service_principals["edi-cxml"] == ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm", "receiving.asn.maintain", "payables.vendor-invoice.intake"]
 	every duty in ["procurement.purchase-order.lookup", "procurement.purchase-order.vendor-confirm"] {
 		data.duties[duty].service_only
 	}
@@ -3281,4 +3283,53 @@ test_payables_withholding_reporter_holds_only_the_record_duty if {
 	"tax.withholding.record" in data.service_grants.payables.tax
 	allowed("tax.withholding.record", "POST", "/v1/tax/withholding/entries")
 	not allowed("tax.withholding.record", "POST", "/v1/tax/withholding/remittance-runs")
+}
+
+# #35 (35-1): the warehouse confirms a shipment shipped without a packing slip with the ship-confirm duty; reading it is an inquiry.
+test_warehouse_shipment_shipped_confirmation if {
+	allowed("warehouse.shipment.confirm", "POST", "/v1/warehouse/shipments/s1:ship")
+	not allowed("warehouse.receipt.register", "POST", "/v1/warehouse/shipments/s1:ship")
+	not allowed("warehouse.inquiry.view", "POST", "/v1/warehouse/shipments/s1:ship")
+	allowed("warehouse.inquiry.view", "GET", "/v1/warehouse/shipments/s1/shipped")
+	not allowed("warehouse.shipment.confirm", "GET", "/v1/warehouse/shipments/s1/shipped")
+}
+
+# #35 (35-4): edi puts an inbound cXML invoice into payables' vendor-invoice intake with a service-only duty; an AP clerk reads it.
+test_payables_vendor_invoice_intake if {
+	allowed("payables.vendor-invoice.intake", "POST", "/v1/payables/vendor-invoice-intake")
+	not allowed("open-item.read", "POST", "/v1/payables/vendor-invoice-intake")
+	allowed("open-item.read", "GET", "/v1/payables/vendor-invoice-intake")
+	allowed("open-item.read", "GET", "/v1/payables/vendor-invoice-intake/i1")
+	not allowed("payables.vendor-invoice.intake", "GET", "/v1/payables/vendor-invoice-intake/i1")
+	"payables.vendor-invoice.intake" in data.service_grants.edi.payables
+	"payables.vendor-invoice.intake" in data.service_principals["edi-cxml"]
+}
+
+# #35 (35-5): the self-billing match asks the tax service for the VAT rate as edi-selfbill, with only the calculate duty.
+test_edi_selfbill_tax_grant if {
+	data.service_grants.edi.tax == ["tax.tax.calculate"]
+	data.service_principals["edi-selfbill"] == ["tax.tax.calculate"]
+}
+
+# #35 (35-5): billing's SELF_BILLED rule is set with the invoice maintain duty and read with the view duty.
+test_billing_customer_billing_rule if {
+	allowed("billing.invoice.maintain", "PUT", "/v1/billing/customers/c1/billing-rule")
+	not allowed("billing.invoice.view", "PUT", "/v1/billing/customers/c1/billing-rule")
+	allowed("billing.invoice.view", "GET", "/v1/billing/customers/c1/billing-rule")
+}
+
+# #35 (35-3): a requester lists the punchout suppliers with the requisition duty; the partner list stays with edi.admin.
+test_edi_punchout_suppliers_for_requesters if {
+	allowed("edi.requisition.create", "GET", "/edi/v1/punchout/suppliers")
+	not allowed("edi.operate", "GET", "/edi/v1/punchout/suppliers")
+}
+
+# #40: the IC charge consumers of billing and payables hold one flag duty each, which opens no route.
+test_iccharge_consumers_hold_only_their_flag_duty if {
+	data.service_principals["billing-iccharge"] == ["billing.iccharge.from-event"]
+	data.service_principals["payables-iccharge"] == ["payables.iccharge.from-event"]
+	data.duties["billing.iccharge.from-event"].flag
+	data.duties["payables.iccharge.from-event"].flag
+	not allowed("billing.iccharge.from-event", "POST", "/v1/billing/free-text-invoices")
+	not allowed("payables.iccharge.from-event", "POST", "/v1/payables/vendor-invoice-intake")
 }

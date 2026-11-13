@@ -189,6 +189,9 @@ func (f *fakeStore) PriceCandidates(_ context.Context, pf store.PriceFilter) ([]
 
 func (f *fakeStore) CreateRequisition(_ context.Context, in store.Requisition, _ store.Idem) (store.Requisition, error) {
 	in.ID, in.Number, in.Status, in.Version = ids.New(), "PR-00000001", store.RequisitionDraft, 1
+	for _, l := range in.Lines { // as the store: a flagged punchout line marks the requisition for good
+		in.NeedsApproval = in.NeedsApproval || l.NeedsApproval
+	}
 	f.requisitions[in.ID] = in
 	return in, nil
 }

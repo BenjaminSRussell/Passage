@@ -116,4 +116,12 @@ type ChargeInvoiceRequestedData struct {
 	Margin   string `json:"margin"`
 	Tax      string `json:"tax"`
 	TaxCode  string `json:"taxCode,omitempty"`
+	// LenderLegalEntityID and BorrowerLegalEntityID are the legal entities of the two registry entities; CustomerAccount (the
+	// borrower as customer of the lender) and VendorAccount (the lender as vendor of the borrower) come from the active pairing.
+	// Billing raises the lender's sales invoice and payables takes in the borrower's vendor invoice from them (#40). Each is empty
+	// when the registry or pairing does not name it.
+	LenderLegalEntityID   string `json:"lenderLegalEntityId,omitempty"`
+	BorrowerLegalEntityID string `json:"borrowerLegalEntityId,omitempty"`
+	CustomerAccount       string `json:"customerAccount,omitempty"`
+	VendorAccount         string `json:"vendorAccount,omitempty"`
 }

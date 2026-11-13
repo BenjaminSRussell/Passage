@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -61,6 +62,9 @@ type sourceRequest struct {
 	SourceID       string `json:"sourceId"`
 	// Slip is set by the event consumer for an 856 or DESADV of one packing slip (never by the route).
 	Slip *domain.SlipRef `json:"-"`
+	// Warehouse is set by the event consumer for the whole-shipment 856 or DESADV of a shipment the warehouse shipped without a
+	// packing slip (never by the route).
+	Warehouse *domain.WarehouseShip `json:"-"`
 }
 
 // outboundFromSource generates the 856 (or the EDIFACT DESADV) from a
@@ -114,6 +118,13 @@ func (a *API) SendFromSource(ctx context.Context, partnerID, transactionSet, sou
 	return a.fromSource(ctx, partnerID, sourceRequest{TransactionSet: transactionSet, SourceID: sourceID, Slip: slip})
 }
 
+// SendFromWarehouse generates and records the whole-shipment 856 or DESADV of a shipment the warehouse shipped without a packing
+// slip (dev.passage.wms.shipment.shipped.v1). It is keyed like the route's whole-shipment notice, so a redelivered event, or the
+// route asked later, returns the interchange already recorded.
+func (a *API) SendFromWarehouse(ctx context.Context, partnerID, transactionSet, shipmentID string, ws domain.WarehouseShip) (store.OutboundResult, bool, error) {
+	return a.fromSource(ctx, partnerID, sourceRequest{TransactionSet: transactionSet, SourceID: shipmentID, Warehouse: &ws})
+}
+
 func (a *API) fromSource(ctx context.Context, partnerID string, req sourceRequest) (store.OutboundResult, bool, error) {
 	if a.Sources == nil {
 		return store.OutboundResult{}, false, httpx.NewProblem(http.StatusServiceUnavailable, CodeSourceDown, "source services are not configured")
@@ -130,15 +141,15 @@ func (a *API) fromSource(ctx context.Context, partnerID string, req sourceReques
 	if err != nil {
 		return store.OutboundResult{}, false, err
 	}
-	doc, shipped, err := a.sourceDocument(ctx, req, profile)
-	if err != nil {
-		return store.OutboundResult{}, false, sourceProblem(err)
-	}
 	parts := []string{"source", partnerID, req.TransactionSet, req.SourceID}
 	if req.Slip != nil && req.Slip.ID != "" {
 		parts = append(parts, req.Slip.ID)
 	}
 	key := strings.Join(parts, ":")
+	doc, shipped, err := a.sourceDocument(ctx, req, profile, partnerID, key)
+	if err != nil {
+		return store.OutboundResult{}, false, sourceProblem(err)
+	}
 	res, created, err := a.recordOutbound(ctx, key, partnerID, req.TransactionSet, doc)
 	if err != nil {
 		return res, created, err
@@ -152,7 +163,10 @@ func (a *API) fromSource(ctx context.Context, partnerID string, req sourceReques
 	return res, created, nil
 }
 
-func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.TradeProfile) (json.RawMessage, []domain.SBShipmentLine, error) {
+// sourceDocument builds the document. An 856 or DESADV lists only the containers this notice owns (ClaimNoticeSSCCs): one another
+// notice of the partner already sent, such as the warehouse's whole-shipment notice before a later packing slip, is left out, and a
+// notice left with none is not sent.
+func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.TradeProfile, partnerID, key string) (json.RawMessage, []domain.SBShipmentLine, error) {
 	var (
 		doc     any
 		err     error
@@ -164,6 +178,11 @@ func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.Tr
 		if sh, err = a.Sources.Shipment(ctx, p.LegalEntityID, req.SourceID); err != nil {
 			return nil, nil, err
 		}
+		if req.Warehouse != nil {
+			if sh, err = domain.ShippedByWarehouse(p, sh, *req.Warehouse); err != nil {
+				return nil, nil, err
+			}
+		}
 		if err = domain.ValidateShipmentSlip(p, sh, req.Slip); err != nil {
 			return nil, nil, err
 		}
@@ -171,9 +190,24 @@ func (a *API) sourceDocument(ctx context.Context, req sourceRequest, p domain.Tr
 		if o, err = a.Sources.Order(ctx, p.LegalEntityID, sh.OrderID); err != nil {
 			return nil, nil, err
 		}
-		doc, err = domain.ASNFromSlip(p, sh, o, req.Slip)
+		// The notice must build before it claims its containers, so a document that cannot be sent claims nothing.
+		if _, err = domain.ASNFromSlip(p, sh, o, req.Slip); err != nil {
+			return nil, nil, err
+		}
+		slip, wanted := req.Slip, domain.NoticeSSCCs(sh, req.Slip)
+		owned, cerr := a.store.ClaimNoticeSSCCs(ctx, partnerID, p.LegalEntityID, req.TransactionSet, key, wanted)
+		if cerr != nil {
+			return nil, nil, cerr
+		}
+		if len(owned) == 0 && len(wanted) > 0 {
+			return nil, nil, fmt.Errorf("%w: every container of shipment %s was already notified to this partner", domain.ErrOutbound, sh.ShipmentNumber)
+		}
+		if len(owned) < len(wanted) {
+			sh, slip = domain.KeepSSCCs(sh, slip, owned)
+		}
+		doc, err = domain.ASNFromSlip(p, sh, o, slip)
 		if err == nil {
-			shipped, err = domain.SelfBillingLinesForSlip(p, sh, o, req.Slip)
+			shipped, err = domain.SelfBillingLinesForSlip(p, sh, o, slip)
 		}
 	default:
 		var inv domain.SourceInvoice

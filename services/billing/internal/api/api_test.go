@@ -43,6 +43,7 @@ type fakeStore struct {
 	slipLines     map[string]bool
 	batchCreates  int
 	reservations  map[string]store.CreditReservation
+	rules         map[string]store.BillingRule
 }
 
 func newFakeStore() *fakeStore {

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -17,12 +19,18 @@ import (
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
+	"github.com/BenjaminSRussell/passage/services/edi/internal/taxrate"
 )
 
 // Self-billing intake (#35, 35-5). A customer's INVOIC 389 arrives on the normal EDIFACT route and is mapped like any INVOIC
 // with selfBilled set. ReconcileSelfBilled matches its lines to the shipments the 856 or DESADV of this partner registered
 // (BR-35.15), opens a dispute for every difference or unmatched line, and marks the message POSTED. The match runs right after
 // receipt and again from POST /self-billing:sweep for anything that missed it, together with the unbilled sweep (EDI-0138).
+
+var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
+
+// SelfBillPrincipal is the service principal the tax rate call runs as, in the legal entity of the partner.
+const SelfBillPrincipal = "edi-selfbill"
 
 const (
 	CodeSelfBillNoProfile = "EDI-0025"
@@ -34,6 +42,15 @@ type selfBillConfigBody struct {
 	PriceTolerance    string `json:"priceTolerance"`
 	WaitDays          int    `json:"waitDays"`
 	TaxRatePct        string `json:"taxRatePct"`
+	TaxCountry        string `json:"taxCountry"`
+	TaxGroup          string `json:"taxGroup"`
+	ItemTaxGroup      string `json:"itemTaxGroup"`
+}
+
+// SelfBillTax determines the VAT rate of a self-billing customer's deliveries; taxrate.Client implements it. Nil leaves the rate a
+// partner setting.
+type SelfBillTax interface {
+	RatePct(ctx context.Context, q taxrate.Query) (decimal.Decimal, error)
 }
 
 func (a *API) putSelfBillConfig(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +77,13 @@ func (a *API) putSelfBillConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.WaitDays != 0 {
 		cfg.WaitDays = body.WaitDays
+	}
+	cfg.TaxCountry, cfg.TaxGroup, cfg.ItemTaxGroup = body.TaxCountry, body.TaxGroup, body.ItemTaxGroup
+	if cfg.TaxCountry != "" && !countryCode.MatchString(cfg.TaxCountry) {
+		fields["taxCountry"] = "must be an ISO 3166 alpha-2 country code"
+	}
+	if len(cfg.TaxGroup) > 40 || len(cfg.ItemTaxGroup) > 40 {
+		fields["taxGroup"] = "taxGroup and itemTaxGroup must be at most 40 characters"
 	}
 	if cfg.QuantityTolerance.IsNegative() {
 		fields["quantityTolerance"] = "must not be negative"
@@ -123,7 +147,7 @@ func itemOf(l domain.InvoiceLine) string {
 
 // selfBillInput turns the canonical self-billed invoice of a message into the lines to match.
 func selfBillInput(messageID string, inv domain.Invoice) store.SelfBillInput {
-	in := store.SelfBillInput{MessageID: messageID, Number: inv.Number, Date: inv.Date}
+	in := store.SelfBillInput{MessageID: messageID, Number: inv.Number, Date: inv.Date, Currency: inv.Currency}
 	for _, l := range inv.Lines {
 		sb := domain.SBLine{Line: l.LineNo, DeliveryNote: l.DeliveryNote, POLine: l.POLine, Item: itemOf(l), Quantity: l.Quantity, UnitPrice: l.UnitPrice}
 		if l.Tax != nil {
@@ -143,6 +167,20 @@ func (a *API) ReconcileSelfBilled(ctx context.Context, limit int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	return a.reconcilePending(ctx, pending)
+}
+
+// ReconcileSelfBilledMessages matches only the given messages: the receipt of an interchange matches what it brought in and leaves
+// every other pending message to the sweep, so one partner's receipt never runs another partner's matching.
+func (a *API) ReconcileSelfBilledMessages(ctx context.Context, messageIDs []string) (int, error) {
+	pending, err := a.store.PendingSelfBilledIn(ctx, messageIDs)
+	if err != nil {
+		return 0, err
+	}
+	return a.reconcilePending(ctx, pending)
+}
+
+func (a *API) reconcilePending(ctx context.Context, pending []store.PendingSelfBilled) (int, error) {
 	done := 0
 	var first error
 	for _, p := range pending {
@@ -151,7 +189,18 @@ func (a *API) ReconcileSelfBilled(ctx context.Context, limit int) (int, error) {
 			slog.ErrorContext(ctx, "self-billed message unreadable", "message", p.MessageID, "err", err)
 			continue
 		}
-		_, err := a.store.ReconcileSelfBill(ctx, p.PartnerID, selfBillInput(p.MessageID, inv))
+		in := selfBillInput(p.MessageID, inv)
+		rate, err := a.selfBillTaxRate(ctx, p.PartnerID, in)
+		if err != nil {
+			// The tax service is down or refused: the message stays MAPPED and the next run tries again.
+			slog.WarnContext(ctx, "self-billed message waits for the tax rate", "message", p.MessageID, "err", err)
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		in.TaxRatePct = rate
+		_, err = a.store.ReconcileSelfBill(ctx, p.PartnerID, in)
 		switch {
 		case err == nil:
 			done++
@@ -171,6 +220,52 @@ func (a *API) ReconcileSelfBilled(ctx context.Context, limit int) (int, error) {
 		}
 	}
 	return done, first
+}
+
+// selfBillTaxRate asks the tax service for the VAT rate of the document when the partner names a tax country and the service is
+// configured; nil keeps the rate each shipment registered with (the partner's taxRatePct).
+func (a *API) selfBillTaxRate(ctx context.Context, partnerID string, in store.SelfBillInput) (*decimal.Decimal, error) {
+	if a.SelfBillTax == nil {
+		return nil, nil
+	}
+	cfg, _, err := a.store.GetSelfBillConfig(ctx, partnerID)
+	if err != nil || cfg.TaxCountry == "" {
+		return nil, err
+	}
+	if in.Currency == "" {
+		slog.WarnContext(ctx, "self-billed document names no currency; the partner's tax rate is used", "message", in.MessageID)
+		return nil, nil
+	}
+	date, err := time.Parse("20060102", in.Date)
+	if err != nil {
+		return nil, nil // the matcher reports the document; the partner's rate stands in
+	}
+	profile, err := a.store.GetTradeProfile(ctx, partnerID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil // the match waits for the trade profile (ErrSelfBillNoProfile)
+	}
+	if err != nil {
+		return nil, err
+	}
+	actor, ok := tenant.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("self-billing tax rate: no tenant in context")
+	}
+	sp, err := tenant.ServicePrincipal(SelfBillPrincipal, actor.TenantID, profile.LegalEntityID)
+	if err != nil {
+		return nil, err
+	}
+	rate, err := a.SelfBillTax.RatePct(tenant.With(ctx, sp), taxrate.Query{LegalEntityID: profile.LegalEntityID, Currency: in.Currency, Date: date,
+		Country: cfg.TaxCountry, TaxGroup: cfg.TaxGroup, ItemTaxGroup: cfg.ItemTaxGroup})
+	if errors.Is(err, taxrate.ErrNoDetermination) {
+		// No tax was determined (no code row, or the provider's fallback): not 0%, so the partner's rate stands.
+		slog.WarnContext(ctx, "the tax service determined no rate for the self-billed document; the partner's tax rate is used", "message", in.MessageID)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rate, nil
 }
 
 type sweepResult struct {
@@ -304,4 +399,15 @@ func (a *API) RunSelfBillSweep(ctx context.Context) (int, error) {
 		total += done + len(opened)
 	}
 	return total, errors.Join(failed...)
+}
+
+// mappedMessages are the ids of the MAPPED messages of the set an interchange brought in.
+func mappedMessages(messages []store.Message, set string) []string {
+	var out []string
+	for _, m := range messages {
+		if m.TransactionSet == set && m.Status == "MAPPED" {
+			out = append(out, m.ID)
+		}
+	}
+	return out
 }

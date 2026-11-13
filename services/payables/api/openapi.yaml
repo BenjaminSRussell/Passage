@@ -317,6 +317,88 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
         '502': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /v1/payables/vendor-invoice-intake:
+    post:
+      operationId: receiveVendorInvoice
+      x-passage-duty: payables.vendor-invoice.intake
+      description: "Stores a vendor invoice a procurement network sent electronically (#35, 35-4), called by the EDI engine with a service token for a cXML InvoiceDetailRequest. legalEntityId defaults to the caller's scope. Nothing is posted: an AP clerk matches the invoice to receipt lines and posts it in receiving. net is the sum of quantity times unit price per line, rounded to the currency; gross defaults to net. The same document (source, sourceRef) again is a 200 with Idempotent-Replayed true; with other content it is a 409 AP-VII-001; an invoice number of the vendor already received from another document is a 409 AP-VII-002."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [source, sourceRef, vendorId, invoiceNumber, invoiceDate, currency, lines]
+              properties:
+                legalEntityId: { type: string, format: uuid }
+                source: { type: string, enum: [CXML] }
+                sourceRef: { type: string, maxLength: 200, description: "The sender document's id at the caller (the EDI message id)." }
+                vendorId: { type: string, format: uuid }
+                invoiceNumber: { type: string, maxLength: 100 }
+                invoiceDate: { type: string, format: date }
+                purpose: { type: string, enum: [standard, creditMemo, debitMemo, lineLevelCreditMemo], default: standard }
+                purchaseOrderId: { type: string, format: uuid }
+                purchaseOrderNumber: { type: string, maxLength: 100 }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+                gross: { type: string, description: Decimal string. }
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [lineNo, quantity, unitPrice]
+                    properties:
+                      lineNo: { type: string, maxLength: 20 }
+                      item: { type: string, maxLength: 100 }
+                      quantity: { type: string, description: Non-zero decimal string. }
+                      unit: { type: string, maxLength: 20 }
+                      unitPrice: { type: string, description: Decimal string of at least 0. }
+      responses:
+        '200': { description: The document was already received with this content., headers: { Idempotent-Replayed: { schema: { type: string, enum: ['true'] } } }, content: { application/json: { schema: { $ref: '#/components/schemas/VendorInvoiceIntake' } } } }
+        '201': { description: The invoice was received., content: { application/json: { schema: { $ref: '#/components/schemas/VendorInvoiceIntake' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listVendorInvoiceIntake
+      x-passage-duty: open-item.read
+      description: Vendor invoices received electronically for one legal entity (legalEntityId, defaulting to the caller's scope), newest first, optionally of one vendor, with keyset paging (limit 1 to 200, default 50; pass the previous nextCursor as cursor).
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: vendorId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string }, description: "The previous page's nextCursor." }
+      responses:
+        '200':
+          description: Received vendor invoices.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/VendorInvoiceIntake' } }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/payables/vendor-invoice-intake/{id}:
+    get:
+      operationId: getVendorInvoiceIntake
+      x-passage-duty: open-item.read
+      description: One vendor invoice received electronically, with its lines as the vendor sent them.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The received invoice., content: { application/json: { schema: { $ref: '#/components/schemas/VendorInvoiceIntake' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/payables/opening-batches:
     post:
       operationId: importOpeningBatch
@@ -758,6 +840,38 @@ paths:
               schema: { type: string }
 components:
   schemas:
+    VendorInvoiceIntake:
+      type: object
+      required: [id, legalEntityId, source, sourceRef, vendorId, invoiceNumber, invoiceDate, purpose, currency, net, gross, lines, status, receivedBy, receivedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        source: { type: string, enum: [CXML, INTERCOMPANY], description: "CXML from the EDI engine; INTERCOMPANY from the intercompany charge consumer (#40)" }
+        sourceRef: { type: string }
+        vendorId: { type: string, format: uuid }
+        invoiceNumber: { type: string }
+        invoiceDate: { type: string, format: date }
+        purpose: { type: string }
+        purchaseOrderId: { type: string, format: uuid }
+        purchaseOrderNumber: { type: string }
+        currency: { type: string }
+        net: { type: string }
+        gross: { type: string }
+        status: { type: string, enum: [RECEIVED] }
+        receivedBy: { type: string }
+        receivedAt: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [lineNo, quantity, unitPrice, amount]
+            properties:
+              lineNo: { type: string }
+              item: { type: string }
+              quantity: { type: string }
+              unit: { type: string }
+              unitPrice: { type: string }
+              amount: { type: string }
     AgingReport:
       type: object
       required: [asOf, legalEntityId, groupBy, buckets]

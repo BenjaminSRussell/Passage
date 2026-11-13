@@ -164,3 +164,11 @@ shopspring/decimal, pgregory.net/rapid for tests).
 ## Wave reference
 
 PSG-40, PRD section 7.40 (Wave 40: Intercompany & Financial Consolidation).
+
+## Invoice settlement mode consumers (#40)
+
+`chargeinvoice.requested.v1` now has its own channel, `passage.interco.chargeinvoice`, and names `lenderLegalEntityId`,
+`borrowerLegalEntityId` (from the registry) and `customerAccount`, `vendorAccount` (from the active pairing of lender and borrower).
+Billing raises the lender's invoice proposal and payables takes the borrower's vendor invoice into its intake from it. The outbox
+reaches Kafka through the `outbox-intercompany` connector (deploy/kafka/connect.yaml, routed by event type; CDC migrations 0007 and
+0008, secret `debezium-cdc-intercompany`). The pairing's customer and vendor accounts must be party ids for the documents to be raised.

@@ -89,9 +89,14 @@ func (a *API) patchRequisition(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if cur.Status == store.RequisitionDraft && cur.Version == version {
-		full := requisitionBody{LegalEntityID: cur.LegalEntityID, OperatingUnitID: edit.OperatingUnitID, Currency: cur.Currency, Lines: *body.Lines}
+		full := requisitionBody{LegalEntityID: cur.LegalEntityID, OperatingUnitID: edit.OperatingUnitID, Currency: cur.Currency}
 		if body.Currency != nil {
 			full.Currency = *body.Currency
+		}
+		// A requester's edit never sets or clears the punchout fields (#35, 35-3): they come from the requisition as created.
+		if full.Lines, err = keepPunchoutFields(cur, *body.Lines, full.Currency); err != nil {
+			fail(w, r, err)
+			return
 		}
 		resolved, err := a.applyCatalogEntries(r, full)
 		if err != nil {

@@ -522,14 +522,14 @@ class ArgoApplicationsTest(unittest.TestCase):
         self.assertIn(dlq, topics)
 
     def test_edi_outbound_consumer_acls(self):
-        # The edi outbound consumer (#35, 35-1): its KafkaUser reads exactly fulfillment's asn channel and billing's invoice
-        # channel, the ones the two AsyncAPI documents declare for asn.issued and invoice.posted, and the group the code
-        # uses, and writes the dead-letter topic it parks on.
+        # The edi outbound consumer (#35, 35-1): its KafkaUser reads exactly fulfillment's asn channel, the warehouse's shipment
+        # channel and billing's invoice channel, the ones the AsyncAPI documents declare for asn.issued, shipment.shipped and
+        # invoice.posted, and the group the code uses, and writes the dead-letter topic it parks on.
         code = (REPO / "services/edi/internal/autosend/autosend.go").read_text()
-        topics_read = set(re.findall(r'(?:FulfillmentTopic|BillingTopic)\s+=\s+"([^"]+)"', code))
+        topics_read = set(re.findall(r'(?:FulfillmentTopic|WarehouseTopic|BillingTopic)\s+=\s+"([^"]+)"', code))
         (group,) = re.findall(r'ConsumerName\s+=\s+"([^"]+)"', code)
         (dlq,) = re.findall(r'DeadLetterTopic\s+=\s+"([^"]+)"', code)
-        for service, type_const in (("fulfillment", "ASNIssuedType"), ("billing", "InvoicePostedType")):
+        for service, type_const in (("fulfillment", "ASNIssuedType"), ("warehouse", "ShipmentShippedType"), ("billing", "InvoicePostedType")):
             (event_type,) = re.findall(type_const + r'\s+=\s+"([^"]+)"', code)
             spec = yaml.safe_load((REPO / f"services/{service}/events/asyncapi.yaml").read_text())
             channels = {ch["address"] for ch in spec["channels"].values()
