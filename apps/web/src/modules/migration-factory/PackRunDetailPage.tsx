@@ -18,6 +18,7 @@ import {
 import { describeProblem, getRun, newKey, releaseQuarantined, type Problem, type QuarantinedRecord } from "./api/client";
 import { canReconcile, dash, formatDateTime, formatKey, money, projectsOf, projectStatus, SOURCE_LABELS, splitList, type ControlTotal } from "./domain";
 import styles from "./pages.module.css";
+import { OpeningLoadPanel } from "./OpeningLoadPanel";
 import { TargetLoadPanel } from "./TargetLoadPanel";
 import { useLoad } from "./useLoad";
 import { ProblemMessage } from "../../shell/errors";
@@ -311,6 +312,7 @@ export function PackRunDetailPage() {
         />
       ) : null}
       {run?.targetLoad ? <TargetLoadPanel initial={run.targetLoad} onChanged={state.reload} /> : null}
+      {run && (run.pack === "onhand" || run.pack === "bank_balances") && run.status === "RECONCILED" ? <OpeningLoadPanel runId={run.runId} pack={run.pack} /> : null}
       {projects.length > 0 && run ? (
         <Card title="Projects">
           <p className={styles.note}>Opening lines never post to the GL. A project that does not reconcile can't be invoiced or estimated.</p>

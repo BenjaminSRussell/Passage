@@ -152,7 +152,10 @@ func parseBankTime(s string) (time.Time, error) {
 const (
 	SourceIntraday  = "camt.052"
 	SourceStatement = "camt.053"
-	SourceNone      = "none"
+	// SourceOpening is the opening book balance the migration factory loaded at the cutover (#49), used until a statement or
+	// report newer than it arrives.
+	SourceOpening = "opening"
+	SourceNone    = "none"
 )
 
 // DefaultStaleHours is the position.staleHours default: a position older than this is marked stale.
@@ -170,6 +173,14 @@ type PositionInput struct {
 	Currency  string
 	Statement *StatementBalance
 	Intraday  *IntradayReport
+	// Opening is the account's migrated opening balance, if it has one.
+	Opening *OpeningBalance
+}
+
+// OpeningBalance is an account's opening book balance at the cutover, as of the end of AsOf (YYYY-MM-DD).
+type OpeningBalance struct {
+	AsOf   string
+	Amount decimal.Decimal
 }
 
 // AccountPosition is the booked and available balance of one account and where it comes from.
@@ -185,7 +196,7 @@ type AccountPosition struct {
 
 // Position picks the freshest figure of the account: the intraday report when it was created after the
 // latest statement closed (the statement's balance is as of the end of its closing day), otherwise the
-// statement. Booked is the interim booked balance (or the opening booked one when the report has no interim);
+// statement, or the migrated opening balance while nothing newer than the cutover has arrived. Booked is the interim booked balance (or the opening booked one when the report has no interim);
 // available is the interim or closing available balance and falls back to booked. A position older than
 // staleHours at now is stale; an account with neither report nor statement has source none and is stale.
 func Position(in PositionInput, now time.Time, staleHours int) AccountPosition {
@@ -213,6 +224,16 @@ func Position(in PositionInput, now time.Time, staleHours int) AccountPosition {
 	if pos.Source == SourceNone && in.Statement != nil {
 		at := stmtAt
 		pos.Booked, pos.Available, pos.Source, pos.AsOf = in.Statement.ClosingAmount, in.Statement.ClosingAmount, SourceStatement, &at
+	}
+	// The migrated opening balance is where the position starts: it holds until a statement closes or a report is created after
+	// the end of the cutover day. A statement closing on the cutover day itself wins, as the bank's own figure.
+	if in.Opening != nil {
+		if d, err := time.Parse("2006-01-02", in.Opening.AsOf); err == nil {
+			at := d.AddDate(0, 0, 1).UTC()
+			if pos.AsOf == nil || pos.AsOf.Before(at) {
+				pos.Booked, pos.Available, pos.Source, pos.AsOf = in.Opening.Amount, in.Opening.Amount, SourceOpening, &at
+			}
+		}
 	}
 	if pos.AsOf != nil {
 		pos.Stale = now.Sub(*pos.AsOf) > time.Duration(staleHours)*time.Hour

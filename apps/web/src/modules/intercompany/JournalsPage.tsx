@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ProblemMessage } from "../../shell/errors";
 import { EntityName } from "../../shell/lookup/EntityName";
-import { Alert, Badge, Button, Card, DataTable, FormField, PageHeader, Select, type BadgeTone, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, buttonClassName, Card, DataTable, ListPage, PageHeader, type BadgeTone, type DataTableColumn, type ListData, type ListFilterDef, type ListQuery } from "../../shell/ui";
 import { describeProblem, type Problem } from "./api/client";
 import { getJournal, listJournals, type PostedEntry, type PostedJournal, type PostingStatus } from "./api/postings";
 import { amount, dash } from "./format";
 import styles from "./pages.module.css";
+import { usePagedRows } from "./usePagedRows";
 
 const statusTone: Record<PostingStatus, BadgeTone> = { posted: "success", pending: "warning", compensated: "danger" };
 const statusLabel: Record<PostingStatus, string> = { posted: "Posted", pending: "Paused, can be resumed", compensated: "Reversed" };
@@ -23,82 +24,47 @@ const columns: DataTableColumn<PostedJournal>[] = [
   { key: "by", header: "Posted by", render: (j) => j.createdBy },
 ];
 
+const journalFilters: ListFilterDef[] = [
+  {
+    kind: "select",
+    key: "status",
+    label: "Status",
+    anyLabel: "All journals",
+    options: [
+      { value: "posted", label: "Posted" },
+      { value: "pending", label: "Paused" },
+      { value: "compensated", label: "Reversed" },
+    ],
+  },
+];
+
+function useJournalRows(query: ListQuery): ListData<PostedJournal> {
+  const status = query.filters.status ?? "";
+  return usePagedRows((after, signal) => listJournals({ status: status || undefined, after }, signal), status);
+}
+
 /** The IC journals posted to the ledgers, newest first (FR-40.5). */
 export function JournalsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState("");
-  const [state, setState] = useState<{ loading: boolean; items: PostedJournal[]; next?: string; failure: Problem | null }>({ loading: true, items: [], failure: null });
-  const [reload, setReload] = useState(0);
-  const [more, setMore] = useState(false);
-
-  useEffect(() => {
-    const ctl = new AbortController();
-    setState((s) => ({ ...s, loading: true, failure: null }));
-    listJournals({ status: status || undefined }, ctl.signal)
-      .then((page) => setState({ loading: false, items: page.items, next: page.nextCursor, failure: null }))
-      .catch((err: unknown) => {
-        if (!ctl.signal.aborted) setState({ loading: false, items: [], failure: describeProblem(err) });
-      });
-    return () => ctl.abort();
-  }, [status, reload]);
-
-  async function loadMore() {
-    if (!state.next) return;
-    setMore(true);
-    try {
-      const page = await listJournals({ status: status || undefined, after: state.next });
-      setState((s) => ({ ...s, items: [...s.items, ...page.items], next: page.nextCursor }));
-    } catch (err) {
-      setState((s) => ({ ...s, failure: describeProblem(err) }));
-    } finally {
-      setMore(false);
-    }
-  }
-
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Posted intercompany journals"
-        description="Each journal made one entry in the ledger of every entity it touches. One that is paused can be resumed by posting it again; one that is reversed was refused by a ledger and its earlier sides were taken back."
-        actions={<Link to="/intercompany/journal">Post a journal</Link>}
-      />
-      <Card>
-        <div className={styles.filters}>
-          <FormField id="journals-status" label="Show">
-            {(c) => (
-              <Select {...c} value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="">All journals</option>
-                <option value="posted">Posted</option>
-                <option value="pending">Paused</option>
-                <option value="compensated">Reversed</option>
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </Card>
-      {state.failure ? (
-        <Alert tone="danger" title="We couldn't load the journals" live="alert" action={<Button size="sm" onClick={() => setReload((n) => n + 1)}>Try again</Button>}>
-          <ProblemMessage problem={state.failure} />
-        </Alert>
-      ) : (
-        <DataTable
-          label="Posted journals"
-          columns={columns}
-          rows={state.items}
-          getRowKey={(j) => j.id}
-          loading={state.loading}
-          onRowOpen={(j) => navigate(`/intercompany/journals/${j.id}`)}
-          empty={{ title: "No journals posted yet", description: "Preview an intercompany line and post it to see it here." }}
-        />
-      )}
-      {state.next && !state.failure ? (
-        <div className={styles.formActions}>
-          <Button loading={more} onClick={() => void loadMore()}>
-            Show more journals
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="intercompany-journals"
+      title="Posted intercompany journals"
+      description="Each journal made one entry in the ledger of every entity it touches. One that is paused can be resumed by posting it again; one that is reversed was refused by a ledger and its earlier sides were taken back."
+      actions={
+        <Link className={buttonClassName("primary")} to="/intercompany/journal">
+          Post a journal
+        </Link>
+      }
+      noun="journals"
+      singular="journal"
+      columns={columns}
+      filters={journalFilters}
+      useRows={useJournalRows}
+      getRowKey={(j) => j.id}
+      onRowOpen={(j) => navigate(`/intercompany/journals/${j.id}`)}
+      empty={{ title: "No journals posted yet", description: "Preview an intercompany line and post it to see it here." }}
+    />
   );
 }
 

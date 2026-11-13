@@ -9,6 +9,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/dq"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
@@ -117,6 +118,13 @@ func (s *Server) startGLRun(w http.ResponseWriter, r *http.Request) {
 		accounts[a] = struct{}{}
 	}
 	accepted, quarantined := domain.ValidateGL(balances, accounts)
+	accepted, quarantined, err = gateSuite(domain.PackGLBalances, balances, dq.GLRows(balances), map[string]map[string]bool{"accounts": dq.SetOf(accounts), "iso4217": dq.ISO4217()},
+		func(g domain.GLBalance) string { return g.LegacyID }, func(g domain.GLBalance) string { return g.LegacyID }, accepted, quarantined,
+		func(g domain.GLBalance, why string) domain.Quarantined { return quarantine(g.Record(), nil, why) })
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	if err := domain.QuarantineShareExceeded(len(quarantined), len(balances), maxPct); err != nil {
 		fail(w, r, err)
 		return

@@ -35,6 +35,7 @@ type fakeRecons struct {
 	finishCalls int
 	reopenNote  string
 	query       store.ReconciliationQuery
+	created     []store.NewReconciliation
 }
 
 func newFakeRecons() *fakeRecons {
@@ -44,7 +45,10 @@ func newFakeRecons() *fakeRecons {
 	}
 }
 
-func (f *fakeRecons) CreateReconciliation(context.Context, store.NewReconciliation, string) (store.Reconciliation, error) {
+func (f *fakeRecons) CreateReconciliation(_ context.Context, in store.NewReconciliation, _ string) (store.Reconciliation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.created = append(f.created, in)
 	return f.rec, nil
 }
 
@@ -509,5 +513,29 @@ func TestParseGLProfiles_RequiresEveryAccountAndRefusesDuplicates(t *testing.T) 
 		if _, err := ParseGLProfiles(raw); err == nil {
 			t.Errorf("%s: want an error", name)
 		}
+	}
+}
+
+// A reconciliation starts from the migrated opening balance only when it says so and sends no balance of its own (#49).
+func TestCreateBankRecon_BookBalanceSource(t *testing.T) {
+	s := newReconServer(t, testProfile())
+	create := func(body string) int {
+		return call(s.h, http.MethodPost, "/v1/treasury/bank-reconciliations", bytes.NewBufferString(body), "application/json", map[string]string{"Idempotency-Key": ids.New()}).Code
+	}
+	stmt := `"statementId":"` + reconStatement + `"`
+	for name, body := range map[string]string{
+		"opening and a balance": `{` + stmt + `,"bookBalanceSource":"opening","bookBalance":"10.00"}`,
+		"unknown source":        `{` + stmt + `,"bookBalanceSource":"ledger","bookBalance":"10.00"}`,
+		"stated without one":    `{` + stmt + `}`,
+	} {
+		if code := create(body); code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", name, code)
+		}
+	}
+	if code := create(`{` + stmt + `,"bookBalanceSource":"opening"}`); code != http.StatusCreated {
+		t.Fatalf("from the opening balance: %d", code)
+	}
+	if got := s.recons.created; len(got) != 1 || !got[0].FromOpening || !got[0].BookBalance.IsZero() {
+		t.Fatalf("store got %+v", got)
 	}
 }

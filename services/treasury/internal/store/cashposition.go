@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
 )
@@ -58,6 +59,7 @@ type PositionAccount struct {
 	Account   BankAccount
 	Statement *domain.StatementBalance
 	Intraday  *domain.IntradayReport
+	Opening   *domain.OpeningBalance
 }
 
 const intradayColumns = `id, bank_account_id, legal_entity_id, report_id, format, currency, created_at_bank, imported_at`
@@ -190,6 +192,15 @@ func (s *Postgres) CashPositionAccounts(ctx context.Context, legalEntityID strin
 					return perr
 				}
 				pa.Statement = &domain.StatementBalance{ClosingDate: closingDate, ClosingAmount: amount}
+			case !errors.Is(err, pgx.ErrNoRows):
+				return err
+			}
+			var asOf string
+			var minor int64
+			err = tx.QueryRow(ctx, `select as_of::text, balance_minor from bank_opening_balance where tenant_id = $1 and bank_account_id = $2`, p.TenantID, a.ID).Scan(&asOf, &minor)
+			switch {
+			case err == nil:
+				pa.Opening = &domain.OpeningBalance{AsOf: asOf, Amount: decimal.New(minor, -int32(money.MinorUnits(a.Currency)))}
 			case !errors.Is(err, pgx.ErrNoRows):
 				return err
 			}

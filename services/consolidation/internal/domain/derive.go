@@ -21,6 +21,12 @@ type UnitTerms struct {
 	// Method is how the group consolidates the unit: MethodFull (the default) line by line with eliminations E1 to E6, or
 	// MethodEquity for an associate or joint venture, which the equity method takes into one line (FR-40.18).
 	Method string
+	// ICReceivableAccount is the main account in the unit's own ledger that holds its receivable from the holder (the parent); a
+	// run reads the IC receivable of the pair from it instead of from every ic_receivable account of the unit.
+	ICReceivableAccount string
+	// ParentPayableAccount is the main account in the holder's ledger that holds the holder's payable to this unit; a run reads
+	// the pair's payable (E2, group currency as collected) from it, so the request no longer has to give it.
+	ParentPayableAccount string
 }
 
 // Consolidation methods of a unit.
@@ -71,6 +77,9 @@ type DeriveInput struct {
 	// PreviousCarrying is the carrying amount (group currency) of each equity-method unit's investment at the end of its previous
 	// fiscal year; a unit without one starts from its investment cost.
 	PreviousCarrying map[string]decimal.Decimal
+	// PreviousCarryingUnit is the same carrying amount in the associate's own currency, when the register holds it (a foreign
+	// associate, IAS 21.44 and IAS 28): it is the base the carrying amount is retranslated from.
+	PreviousCarryingUnit map[string]decimal.Decimal
 }
 
 // Derived is what a collection gives a run.
@@ -192,7 +201,16 @@ func DeriveRun(in DeriveInput) (Derived, error) {
 			NetIncome: profit, SellerIsSubsidiary: terms.SellerIsSubsidiary, ICNetInvestment: terms.ICNetInvestment, FXGainLossAccount: terms.FXGainLossAccount,
 			Dividend: dividends,
 		}
+		if err := readPairAccounts(&pair, in, u, terms, end); err != nil {
+			return Derived{}, fail(CodeRunFromCollection, err.Error())
+		}
 		if o, ok := in.IC[u.ID]; ok {
+			if terms.ICReceivableAccount != "" && o.ICReceivable != nil {
+				return Derived{}, fail(CodeRunFromCollection, "its IC receivable is read from account "+terms.ICReceivableAccount+" of its ledger; leave icReceivable out of the request")
+			}
+			if terms.ParentPayableAccount != "" && o.PayableGroup != nil {
+				return Derived{}, fail(CodeRunFromCollection, "the payable to it is read from account "+terms.ParentPayableAccount+" of its holder's ledger; leave payableGroup out of the request")
+			}
 			set := func(dst *decimal.Decimal, v *decimal.Decimal) {
 				if v != nil {
 					*dst = *v
@@ -233,6 +251,52 @@ func DeriveRun(in DeriveInput) (Derived, error) {
 	return out, nil
 }
 
+// readPairAccounts reads the IC pair amounts of a subsidiary from the collected ledgers when its terms name the pair accounts
+// (FR-40.6, BR-40.15): the receivable from the unit's own account (unit currency, debit balance) and the payable from the holder's
+// account (credit balance, in the group currency as collected). A pair account with no balance in the collection reads as zero; one
+// the holder's ledger does not hold in the group currency is refused, because E2 takes the payable in the group currency.
+func readPairAccounts(pair *Pair, in DeriveInput, u Unit, terms UnitTerms, end time.Time) error {
+	if terms.ICReceivableAccount != "" {
+		recv := decimal.Zero
+		for _, l := range in.Lines {
+			if l.UnitID == u.ID && l.MainAccount == terms.ICReceivableAccount {
+				recv = recv.Add(l.UnitAmount)
+			}
+		}
+		if recv.IsNegative() {
+			return fmt.Errorf("account %s holds a credit balance of %s, so it is not a receivable from the holder", terms.ICReceivableAccount, recv.Neg().String())
+		}
+		pair.ICReceivable = recv
+	}
+	if terms.ParentPayableAccount != "" {
+		holders := map[string]bool{}
+		for _, h := range u.Holdings {
+			if inForce(OwnershipInterval{From: h.From, To: h.To, Percent: h.Percent}, end) {
+				holders[h.HolderUnitID] = true
+			}
+		}
+		currency := map[string]string{}
+		for _, x := range in.Units {
+			currency[x.ID] = x.Currency
+		}
+		payable := decimal.Zero
+		for _, l := range in.Lines {
+			if !holders[l.UnitID] || l.MainAccount != terms.ParentPayableAccount {
+				continue
+			}
+			if currency[l.UnitID] != in.GroupCurrency {
+				return fmt.Errorf("the holder %s keeps its ledger in %s; the payable to the unit is read in the group currency %s, so give payableGroup in the request instead", l.UnitID, currency[l.UnitID], in.GroupCurrency)
+			}
+			payable = payable.Sub(l.GroupAmount)
+		}
+		if payable.IsNegative() {
+			return fmt.Errorf("account %s of the holder holds a debit balance of %s, so it is not a payable to the unit", terms.ParentPayableAccount, payable.Neg().String())
+		}
+		pair.PayableGroup = payable
+	}
+	return nil
+}
+
 // deriveAssociate reads an equity-method unit: the group's share of its profit and of its dividends in the group currency, at the
 // average rate, and the investment's carrying amount at the start of the fiscal year.
 func deriveAssociate(in DeriveInput, u Unit, pct decimal.Decimal, terms UnitTerms, rates Rates, profit, dividends decimal.Decimal) (RunAssociate, error) {
@@ -248,7 +312,38 @@ func deriveAssociate(in DeriveInput, u Unit, pct decimal.Decimal, terms UnitTerm
 		NetIncome:         round(profit.Mul(rates.Average), in.GroupCurrency),
 		DividendsReceived: round(dividends.Mul(pct).Div(decimal.NewFromInt(100)).Mul(rates.Average), in.GroupCurrency),
 	}
+	if u.Currency != in.GroupCurrency {
+		// A foreign associate is a foreign operation (IAS 21.44, IAS 28.25): its carrying amount is kept in its own currency and
+		// retranslated at the closing rate, the difference going to the translation reserve.
+		// A register line carries the investment from last year's closing rate, which is this year's opening rate. Without one the
+		// run starts from the investment cost, which the group booked at the rate of acquisition: the opening is translated at that
+		// rate, so the opening carrying amount is the cost exactly and the whole move to the closing rate goes to the reserve.
+		openRate := rates.Opening
+		fc, ok := in.PreviousCarryingUnit[u.ID]
+		fromRegister := ok || hasPrev(in.PreviousCarrying, u.ID)
+		if !fromRegister {
+			openRate = terms.HistoricalRate
+		}
+		if !openRate.IsPositive() {
+			return RunAssociate{}, fmt.Errorf("needs the opening rate of %s to retranslate the investment: collect the end of its previous fiscal year, give the opening rate, or store the rate at acquisition", u.Currency)
+		}
+		switch {
+		case ok:
+		case fromRegister:
+			fc = opening.Div(openRate) // a register line from before retranslation: its group amount was at last year's closing rate
+		default:
+			fc = terms.InvestmentCost.Div(openRate)
+		}
+		a.Foreign = &ForeignAssociate{UnitCurrency: u.Currency, OpeningCarrying: fc, NetIncome: profit, Dividends: dividends.Mul(pct).Div(decimal.NewFromInt(100)),
+			OpeningRate: openRate, AverageRate: rates.Average, ClosingRate: rates.Closing}
+		a.OpeningCarrying = round(fc.Mul(openRate), in.GroupCurrency)
+	}
 	return RunAssociate{ID: u.ID, Associate: a, Cost: terms.InvestmentCost}, nil
+}
+
+func hasPrev(m map[string]decimal.Decimal, id string) bool {
+	_, ok := m[id]
+	return ok
 }
 
 // NetAssets reads a unit's closing net assets and net income (unit currency) from its collected lines the way RunUnits does.

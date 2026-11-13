@@ -132,9 +132,38 @@ func TestOpeningBatchRefusesAForeignJournalUnderItsKey(t *testing.T) {
 	if rec := do(t, h, http.MethodGet, "/v1/inventory/onhand?product="+p2, "", []string{"inventory.read"}, nil); strings.Contains(rec.Body.String(), "500") {
 		t.Fatalf("the foreign journal was posted: %s", rec.Body)
 	}
+	// The refused call released what it reserved: another batch holding L1 goes through (#49).
+	if rec := do(t, h, http.MethodPost, "/v1/inventory/opening-batches", openingBody("b11", openingItem("L1", p2, "10", "1")), []string{"inventory.import.write"}, nil); rec.Code != http.StatusCreated {
+		t.Fatalf("L1 stayed reserved by the refused batch: %d %s", rec.Code, rec.Body)
+	}
 	// The prefix is reserved: nobody can create a journal under it through the journal API.
 	create := `{"legalEntityId":"` + glEntity + `","journalType":"OPENING_BALANCE","postingDate":"2026-12-31","currency":"USD"}`
 	if rec := do(t, h, http.MethodPost, "/v1/inventory/journals", create, []string{"inventory.journal.write"}, map[string]string{"Idempotency-Key": "opening-batch:b10"}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("reserved key: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A reference opens stock once per legal entity, across batches (#49): a second batch holding a line of the first is refused with
+// the rows named, and nothing of it is posted; the first batch's resend still replays.
+func TestOpeningBatchRefusesAReferenceAnotherBatchOpened(t *testing.T) {
+	h := openingServer(t)
+	imp := []string{"inventory.import.write"}
+	p1, p2 := ids.New(), ids.New()
+	first := openingBody("b1", openingItem("L1", p1, "10", "2.5"), openingItem("L2", p2, "3", "1.1"))
+	if rec := do(t, h, http.MethodPost, "/v1/inventory/opening-batches", first, imp, nil); rec.Code != http.StatusCreated {
+		t.Fatalf("first batch: %d %s", rec.Code, rec.Body)
+	}
+	second := openingBody("b2", openingItem("L9", p1, "1", "2.5"), openingItem("L2", p2, "3", "1.1"))
+	rec := do(t, h, http.MethodPost, "/v1/inventory/opening-batches", second, imp, nil)
+	pb := decodeProblem(t, rec)
+	if rec.Code != http.StatusUnprocessableEntity || pb.Code != "INV-OPB-005" || !strings.Contains(pb.Errors["items[2].reference"], "b1") || pb.Errors["items[1].reference"] != "" {
+		t.Fatalf("overlapping batch: %d %s", rec.Code, rec.Body)
+	}
+	// L9 was not left reserved by the refused batch: a batch with it alone goes through.
+	if rec := do(t, h, http.MethodPost, "/v1/inventory/opening-batches", openingBody("b3", openingItem("L9", p1, "1", "2.5")), imp, nil); rec.Code != http.StatusCreated {
+		t.Fatalf("the refused batch kept L9: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(t, h, http.MethodPost, "/v1/inventory/opening-batches", first, imp, nil); rec.Code != http.StatusOK || rec.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("resend of the first batch: %d %s", rec.Code, rec.Body)
 	}
 }

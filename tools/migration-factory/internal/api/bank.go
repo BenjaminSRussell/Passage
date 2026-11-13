@@ -9,6 +9,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/dq"
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
 )
 
@@ -93,6 +94,13 @@ func (s *Server) startBankRun(w http.ResponseWriter, r *http.Request) {
 		accounts[a] = struct{}{}
 	}
 	accepted, quarantined := domain.ValidateBankBalances(lines, accounts)
+	accepted, quarantined, err = gateSuite(domain.PackBankBal, lines, dq.BankRows(lines), map[string]map[string]bool{"bankAccounts": dq.SetOf(accounts), "iso4217": dq.ISO4217()},
+		func(l domain.BankBalanceLine) string { return l.LegacyID }, func(l domain.BankBalanceLine) string { return l.LegacyID }, accepted, quarantined,
+		func(l domain.BankBalanceLine, why string) domain.Quarantined { return quarantine(l.Record(), l, why) })
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
 	if err := domain.QuarantineShareExceeded(len(quarantined), len(lines), maxPct); err != nil {
 		fail(w, r, err)
 		return

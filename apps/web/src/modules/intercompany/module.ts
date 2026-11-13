@@ -13,6 +13,7 @@ import { PartnersPage } from "./PartnersPage";
 import { PlanningPage } from "./PlanningPage";
 import { ReconciliationPage } from "./ReconciliationPage";
 import { ReconRunPage, ReconRunsPage } from "./ReconRunsPage";
+import { EntitiesPage, EntityFormPage, LedgerReconcilePage, MatrixPage, NewTransferPricePage, SettingsPage, TransferPricesPage } from "./SetupPages";
 import { TransferPricingPage } from "./TransferPricingPage";
 
 const intercompany: PassageModule = {
@@ -37,6 +38,14 @@ const intercompany: PassageModule = {
     { path: "/intercompany/planning", element: createElement(PlanningPage), handle: { title: "Intercompany planning" } },
     { path: "/intercompany/chains", element: createElement(ChainsPage), handle: { title: "Direct delivery chains" } },
     { path: "/intercompany/transfer-pricing", element: createElement(TransferPricingPage), handle: { title: "Transfer-pricing evidence" } },
+    { path: "/intercompany/entities", element: createElement(EntitiesPage), handle: { title: "Intercompany entities" } },
+    { path: "/intercompany/entities/new", element: createElement(EntityFormPage), handle: { title: "Add an intercompany entity" } },
+    { path: "/intercompany/entities/:entity", element: createElement(EntityFormPage), handle: { title: "Intercompany entity" } },
+    { path: "/intercompany/matrix", element: createElement(MatrixPage), handle: { title: "Intercompany accounting matrix" } },
+    { path: "/intercompany/transfer-prices", element: createElement(TransferPricesPage), handle: { title: "Transfer prices" } },
+    { path: "/intercompany/transfer-prices/new", element: createElement(NewTransferPricePage), handle: { title: "Add a transfer price" } },
+    { path: "/intercompany/settings", element: createElement(SettingsPage), handle: { title: "Intercompany settings" } },
+    { path: "/intercompany/ledger-reconciliation", element: createElement(LedgerReconcilePage), handle: { title: "Reconcile from the ledgers" } },
   ],
   nav: [
     { label: "Intercompany workspace", to: "/intercompany", duty: "intercompany.view" },
@@ -51,6 +60,11 @@ const intercompany: PassageModule = {
     { label: "Intercompany planning", to: "/intercompany/planning", duty: "intercompany.plan" },
     { label: "Direct delivery chains", to: "/intercompany/chains", duty: "intercompany.view" },
     { label: "Transfer-pricing evidence", to: "/intercompany/transfer-pricing", duty: "intercompany.view" },
+    { label: "Entities", to: "/intercompany/entities", duty: "intercompany.view" },
+    { label: "Accounting matrix", to: "/intercompany/matrix", duty: "intercompany.view" },
+    { label: "Transfer prices", to: "/intercompany/transfer-prices", duty: "intercompany.view" },
+    { label: "Settings", to: "/intercompany/settings", duty: "intercompany.view" },
+    { label: "Reconcile from the ledgers", to: "/intercompany/ledger-reconciliation", duty: "intercompany.reconcile" },
   ],
 };
 

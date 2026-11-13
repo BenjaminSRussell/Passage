@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -112,6 +113,16 @@ func QuarantineShareExceeded(quarantined, total int, maxPct decimal.Decimal) err
 		return fmt.Errorf("%w: MIG-1504 quarantine share %s%% exceeds %s%%; load stopped", ErrInvalid, pct.StringFixed(2), maxPct.StringFixed(2))
 	}
 	return nil
+}
+
+// Currencies lists the ISO 4217 currencies the packs accept, sorted.
+func Currencies() []string {
+	out := make([]string, 0, len(iso4217))
+	for c := range iso4217 {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ValidCurrency reports whether code is an ISO 4217 currency the packs accept; the data-quality suites use it as their
