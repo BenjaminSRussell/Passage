@@ -64,6 +64,29 @@ describe.runIf(ownerUrl)("kill switch shared through Postgres (AC-47.6)", () => 
     expect(a.registry.isHalted(t)).toBe(false);
   });
 
+  it("a pod that takes a toggle also applies the earlier toggles it had not polled yet, so its next poll skips none", async () => {
+    const t1 = nextTenant();
+    const t2 = nextTenant();
+    const a = pod(log);
+    const b = pod(log);
+    await a.poller.poll();
+    await b.poller.poll();
+    // Pod a halts t1; before pod b polls, pod b takes a later toggle for t2.
+    await toggle(admin(t1), { scope: "TENANT", tenantId: t1, active: true }, a.registry);
+    await toggle(admin(t2), { scope: "TENANT", tenantId: t2, active: true }, b.registry);
+    expect(b.registry.isHalted(t2)).toBe(true);
+    expect(b.registry.isHalted(t1)).toBe(true);
+    await b.poller.poll();
+    expect(b.registry.isHalted(t1)).toBe(true);
+    // The same holds when the later toggle is a no-op on the stored state.
+    const t3 = nextTenant();
+    const c = pod(log);
+    await c.poller.poll();
+    await toggle(admin(t3), { scope: "TENANT", tenantId: t3, active: true }, a.registry);
+    await toggle(admin(t2), { scope: "TENANT", tenantId: t2, active: true }, c.registry);
+    expect(c.registry.isHalted(t3)).toBe(true);
+  });
+
   it("the global switch reaches every pod and halts every tenant", async () => {
     const a = pod(log);
     const b = pod(log);

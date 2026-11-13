@@ -29,8 +29,19 @@ export interface KillSwitchToggle {
  * `toggle` is idempotent by scope against the stored state, draws the version and writes the
  * `killswitch.changed` event in one transaction; `changesSince` is what each pod polls.
  */
+export interface KillSwitchToggleResult {
+  /** The stored toggle: the new one, or the current one when the switch was already in that state. */
+  change: KillSwitchChange;
+  created: boolean;
+  /**
+   * Every toggle after the caller's `sinceVersion`, oldest first, read in the toggle's transaction. The pod applies
+   * these instead of `change` alone: applying a newer version first would make its next poll skip the older ones.
+   */
+  changes: KillSwitchChange[];
+}
+
 export interface KillSwitchLog {
-  toggle(t: KillSwitchToggle): Promise<{ change: KillSwitchChange; created: boolean }>;
+  toggle(t: KillSwitchToggle, sinceVersion: number): Promise<KillSwitchToggleResult>;
   changesSince(version: number): Promise<KillSwitchChange[]>;
 }
 
@@ -121,16 +132,20 @@ export async function handleKillSwitchCommand(
   }
   if ("log" in input) {
     // The stored state decides idempotence, so two pods taking the same toggle store it once.
-    const { change, created } = await input.log.toggle({
-      actorTenantId: input.principal.tenantId,
-      scope: cmd.scope,
-      ...(cmd.tenantId !== undefined ? { tenantId: cmd.tenantId } : {}),
-      active: cmd.active,
-      byUser: input.principal.userId,
-      changedAt: input.now().toISOString(),
-    });
-    // This pod applies at once; the others apply it on their next poll.
-    input.registry.apply(change);
+    const { change, created, changes } = await input.log.toggle(
+      {
+        actorTenantId: input.principal.tenantId,
+        scope: cmd.scope,
+        ...(cmd.tenantId !== undefined ? { tenantId: cmd.tenantId } : {}),
+        active: cmd.active,
+        byUser: input.principal.userId,
+        changedAt: input.now().toISOString(),
+      },
+      input.registry.version,
+    );
+    // This pod applies at once, in version order with any toggle it had not polled yet; the others apply it on
+    // their next poll.
+    for (const c of changes) input.registry.apply(c);
     return created ? { body: resultOf(change), event: killSwitchChangedEvent(change, input.principal.tenantId) } : { body: resultOf(change) };
   }
   const current = input.registry.lastChange(cmd.tenantId);
