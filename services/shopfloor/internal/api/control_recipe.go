@@ -291,6 +291,7 @@ type edgeWriteRequest struct {
 	Node      string           `json:"node"`
 	Value     decimal.Decimal  `json:"value"`
 	Readback  *decimal.Decimal `json:"readback"`
+	NodeType  string           `json:"nodeType"`
 	Written   bool             `json:"written"`
 	Reason    *string          `json:"reason"`
 	At        *time.Time       `json:"at"`
@@ -336,7 +337,11 @@ func (a *API) edgeReportControlRecipe(w http.ResponseWriter, r *http.Request) {
 			fields["writes"] = "reason must be at most 1000 characters"
 			break
 		}
-		e := store.EdgeWrite{PhasePath: wr.PhasePath, Node: wr.Node, Value: wr.Value, Readback: wr.Readback, Written: wr.Written, Reason: wr.Reason}
+		if !domain.KnownNodeType(wr.NodeType) {
+			fields["writes"] = "nodeType must be an OPC-UA numeric or Boolean type (Double, Float, Int32, ...) or left out"
+			break
+		}
+		e := store.EdgeWrite{PhasePath: wr.PhasePath, Node: wr.Node, Value: wr.Value, Readback: wr.Readback, NodeType: wr.NodeType, Written: wr.Written, Reason: wr.Reason}
 		if wr.At != nil {
 			e.At = wr.At.UTC()
 		}

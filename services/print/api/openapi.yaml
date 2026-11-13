@@ -213,19 +213,51 @@ paths:
         A template changes the title, footer line, column names and visible columns of a document type, and names the text
         blocks that supply the letter body and form notes. Every save raises the version. At most one template of a document
         type is the default; saving one as the default clears the flag on the previous one. The document type of an
-        existing template cannot change.
+        existing template cannot change. Replacing an existing template needs the version you edited as If-Match (the
+        read's ETag, for example "3"): without it 428 PRN-0018, and a save based on an older version than the current
+        one is 412 PRN-0017; nothing is stored either way. A new template is created without If-Match. Every saved
+        version is kept with who saved it (GET .../versions).
       x-passage-duty: print.admin
       parameters:
         - { name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z][A-Z0-9_-]{1,39}$' } }
+        - { name: If-Match, in: header, required: false, schema: { type: string }, description: 'The template version as an entity tag, for example "3".' }
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/DocumentTemplateRequest' }
       responses:
-        '200': { description: Template saved, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentTemplate' } } } }
+        '200': { description: Template saved; the ETag header is its new version., content: { application/json: { schema: { $ref: '#/components/schemas/DocumentTemplate' } } } }
         '400': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /print/v1/document-templates/{code}/versions:
+    get:
+      operationId: listDocumentTemplateVersions
+      summary: Every saved version of a document template, newest first (46-1)
+      x-passage-duty: print.job.submit
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The versions, each with what it held, who saved it and when
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/DocumentTemplate'
+                        - type: object
+                          properties:
+                            savedBy: { type: string }
+                            savedAt: { type: string, format: date-time }
+        '404': { $ref: '#/components/responses/Problem' }
   /print/v1/text-blocks:
     get:
       operationId: listTextBlocks

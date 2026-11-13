@@ -128,6 +128,8 @@ type Store interface {
 	IssueEnrollmentToken(ctx context.Context, edgeID, createdBy string, now time.Time) (store.EnrollmentToken, error)
 	Enroll(ctx context.Context, token, csrPEM string, issuer pki.Issuer, now time.Time) (store.EdgeCertificate, error)
 	RenewCertificate(ctx context.Context, edgeID, subject, csrPEM string, issuer pki.Issuer, now time.Time) (store.EdgeCertificate, error)
+	ListEdgeCertificates(ctx context.Context, edgeID string) ([]store.CertificateRecord, error)
+	RevokeEdgeCertificate(ctx context.Context, edgeID, serial, reason, by string, now time.Time) (store.CertificateRecord, error)
 	AssignWorkerSetup(ctx context.Context, workerID string, version int, profileID, agreementID *string, assignedBy string, idem store.Idem) (store.Worker, error)
 	AssignWorkerResource(ctx context.Context, workerID string, version int, resourceID *string, assignedBy string, idem store.Idem) (store.Worker, error)
 	SavePay(ctx context.Context, calc store.PayCalculation, idem store.Idem, response any) error
@@ -145,6 +147,8 @@ type Store interface {
 	CodeDowntime(ctx context.Context, id, reason, category string, idem store.Idem) (store.Downtime, error)
 	OpenAndon(ctx context.Context, siteID string) ([]store.Andon, error)
 	SweepAndon(ctx context.Context, now time.Time) (store.AndonSweepResult, error)
+	GetAndonSettings(ctx context.Context) (store.AndonSettingsView, error)
+	PutAndonSettings(ctx context.Context, set domain.AndonSettings, user string) (store.AndonSettingsView, error)
 	ClearAndon(ctx context.Context, id, reason, clearedBy string, now time.Time, idem store.Idem) (store.Andon, error)
 	LoadOEEStreams(ctx context.Context, resourceIDs []string, from, to time.Time) (map[string]domain.OEEStream, error)
 	ExportPay(ctx context.Context, fromDate, toDate, createdBy string, idem store.Idem) (store.PayExport, error)

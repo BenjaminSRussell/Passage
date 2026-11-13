@@ -18,7 +18,9 @@ import (
 
 // EdgeTenantLookup finds the tenant of an edge node by its id; it returns "" for an unknown node.
 type EdgeTenantLookup interface {
-	EdgeNodeTenant(ctx context.Context, id string) (string, error)
+	// EdgeNodeTenant returns the tenant of a node, or "" when the node is unknown or certHash (the SHA-256 of the
+	// presented certificate, hex, as Envoy forwards it) is a certificate of the node that was revoked.
+	EdgeNodeTenant(ctx context.Context, id, certHash string) (string, error)
 }
 
 const (
@@ -44,7 +46,7 @@ func EdgeCertIdentity(lookup EdgeTenantLookup) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r) // not a connector certificate: no identity, the tenant middleware refuses it
 				return
 			}
-			tenantID, err := lookup.EdgeNodeTenant(r.Context(), strings.ToLower(nodeID))
+			tenantID, err := lookup.EdgeNodeTenant(r.Context(), strings.ToLower(nodeID), certHash(xfcc))
 			if err != nil || tenantID == "" {
 				next.ServeHTTP(w, r)
 				return
@@ -79,6 +81,21 @@ func certCommonName(xfcc string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// certHash reads the Hash (the SHA-256 of the client certificate, hex) out of a single-element X-Forwarded-Client-Cert
+// value; "" when there is none.
+func certHash(xfcc string) string {
+	parts := splitOutsideQuotes(xfcc, ',')
+	if len(parts) != 1 {
+		return ""
+	}
+	for _, kv := range splitOutsideQuotes(parts[0], ';') {
+		if k, v, ok := strings.Cut(strings.TrimSpace(kv), "="); ok && strings.EqualFold(k, "Hash") {
+			return strings.ToLower(strings.Trim(v, `"`))
+		}
+	}
+	return ""
 }
 
 func splitOutsideQuotes(s string, sep byte) []string {
