@@ -60,12 +60,13 @@ describe("RFQ types list", () => {
   });
 
   it("shows the problem code and retries, then filters by status and pages", async () => {
-    const mock = stubFetch(() => problem(403, "AUTH-0003", "missing duty"));
+    const mock = stubFetch(() => problem(500, "PRC-0500", "store unavailable"));
     renderAt("/purchasing/rfq-types");
-    expect(await screen.findByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText(/PRC-0500/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(mock).toHaveBeenCalledTimes(2));
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "INACTIVE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(mock.mock.calls.some(([url]) => String(url).includes("status=INACTIVE"))).toBe(true));
   });
 });

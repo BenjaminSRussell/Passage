@@ -14,6 +14,11 @@ import {
   buttonClassName,
   type BadgeTone,
   type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import {
   createSchedulingAgreement,
@@ -51,6 +56,7 @@ import {
   uuidPattern,
   type Failure,
   Named,
+  useProcurementPages,
 } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
@@ -72,7 +78,7 @@ const qty = (value: string, unit: string) => `${value} ${unit}`;
 
 // --- Release monitor -------------------------------------------------------
 
-const monitorColumns: DataTableColumn<SchedulingAgreementRow>[] = [
+const monitorColumns: ListColumn<SchedulingAgreementRow>[] = [
   { key: "number", header: "Number", mono: true },
   { key: "vendorId", header: "Vendor", render: (a) => <Named entity="vendor" id={a.vendorId} /> },
   { key: "productId", header: "Product", render: (a) => <Named entity="product" id={a.productId} /> },
@@ -88,48 +94,36 @@ const monitorColumns: DataTableColumn<SchedulingAgreementRow>[] = [
   },
 ];
 
+const monitorFilters: ListFilterDef[] = [{ kind: "entity", key: "vendorId", label: "Vendor", entity: "vendor" }];
+
+function useMonitorRows(query: ListQuery): ListData<SchedulingAgreementRow> {
+  const vendorId = query.filters.vendorId ?? "";
+  return useProcurementPages(vendorId, (cursor, signal) => listSchedulingAgreements({ vendorId: vendorId || undefined }, { cursor, signal }));
+}
+
 /** Monitor scheduling agreement releases (FR-17.15, SAP ME85): open quantity, last release, next due. */
 export function SchedulingAgreementsPage() {
   const navigate = useNavigate();
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<SchedulingAgreementRow[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listSchedulingAgreements({}, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Scheduling agreements"
-        description="Dated delivery schedules with a vendor for one product and site. Release runs send the schedule as forecast (FRC) or just-in-time (JIT) releases with cumulative quantities."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/scheduling-agreements/new">
-            New scheduling agreement
-          </Link>
-        }
-      />
-      {page.error ? <LoadError what="scheduling agreements" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Scheduling agreements"
-        columns={monitorColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(a) => a.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No scheduling agreements yet", description: "Agree a delivery schedule with a vendor, then release it to them on the agreed rhythm." }}
-        onRowOpen={(a) => navigate(`/purchasing/scheduling-agreements/${a.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-scheduling-agreements"
+      title="Scheduling agreements"
+      description="Dated delivery schedules with a vendor for one product and site. Release runs send the schedule as forecast (FRC) or just-in-time (JIT) releases with cumulative quantities."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/scheduling-agreements/new">
+          New scheduling agreement
+        </Link>
+      }
+      noun="scheduling agreements"
+      singular="scheduling agreement"
+      columns={monitorColumns}
+      filters={monitorFilters}
+      useRows={useMonitorRows}
+      search={(a) => ({ number: a.number })}
+      getRowKey={(a) => a.id}
+      onRowOpen={(a) => navigate(`/purchasing/scheduling-agreements/${a.id}`)}
+      empty={{ title: "No scheduling agreements yet", description: "Agree a delivery schedule with a vendor, then release it to them on the agreed rhythm." }}
+    />
   );
 }
 

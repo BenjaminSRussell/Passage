@@ -1,7 +1,23 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { EntityLookup } from "../../shell/lookup/EntityLookup";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, Skeleton, buttonClassName, type DataTableColumn } from "../../shell/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  FormField,
+  Input,
+  PageHeader,
+  Select,
+  Skeleton,
+  buttonClassName,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
+} from "../../shell/ui";
 import {
   changeRFQType,
   createRFQType,
@@ -14,7 +30,7 @@ import {
   type RFQTypeInput,
   type RFQTypeStatus,
 } from "./api/client";
-import { Details, LoadError, StatusBadge, decimalPattern, rankingLabels, statusLabel, useResource, uuidPattern, type Failure, Named } from "./parts";
+import { Details, LoadError, StatusBadge, decimalPattern, rankingLabels, statusLabel, useResource, uuidPattern, type Failure, Named, useProcurementPages } from "./parts";
 import styles from "./pages.module.css";
 import { ProblemMessage } from "../../shell/errors";
 
@@ -99,7 +115,7 @@ export function CriteriaEditor({
 
 const STATUSES: RFQTypeStatus[] = ["ACTIVE", "INACTIVE"];
 
-const columns: DataTableColumn<RFQType>[] = [
+const columns: ListColumn<RFQType>[] = [
   { key: "code", header: "Code", mono: true },
   { key: "name", header: "Name" },
   {
@@ -113,72 +129,38 @@ const columns: DataTableColumn<RFQType>[] = [
   { key: "status", header: "Status", render: (t) => <StatusBadge status={t.status} /> },
 ];
 
+const filters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
+];
+
+function useTypeRows(query: ListQuery): ListData<RFQType> {
+  const status = (query.filters.status ?? "") as RFQTypeStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listRFQTypes({ status }, { cursor, signal }));
+}
+
 /** RFQ types with a status filter and load-more paging (FR-17.19). */
 export function RFQTypesPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<RFQTypeStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<RFQType[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listRFQTypes({ status }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="RFQ types"
-        description="Kinds of request for quotation: whether bids are sealed, whether a sent RFQ may be amended, how replies are ranked and the scoring criteria a new RFQ starts with. An RFQ copies these when it is created, so changing a type never moves an RFQ already out."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/rfq-types/new">
-            New RFQ type
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="rt-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as RFQTypeStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="RFQ types" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="RFQ types"
-        columns={columns}
-        rows={page.error ? [] : rows}
-        getRowKey={(t) => t.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No RFQ types yet", description: "Create STANDARD and SEALED types so buyers start an RFQ with the right bidding rules." }}
-        onRowOpen={(t) => navigate(`/purchasing/rfq-types/${t.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-rfq-types"
+      title="RFQ types"
+      description="Kinds of request for quotation: whether bids are sealed, whether a sent RFQ may be amended, how replies are ranked and the scoring criteria a new RFQ starts with. An RFQ copies these when it is created, so changing a type never moves an RFQ already out."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/rfq-types/new">
+          New RFQ type
+        </Link>
+      }
+      noun="RFQ types"
+      singular="RFQ type"
+      columns={columns}
+      filters={filters}
+      useRows={useTypeRows}
+      search={(t) => ({ number: t.code, name: t.name })}
+      getRowKey={(t) => t.id}
+      onRowOpen={(t) => navigate(`/purchasing/rfq-types/${t.id}`)}
+      empty={{ title: "No RFQ types yet", description: "Create STANDARD and SEALED types so buyers start an RFQ with the right bidding rules." }}
+    />
   );
 }
 

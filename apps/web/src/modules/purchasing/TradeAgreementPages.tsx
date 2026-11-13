@@ -4,14 +4,17 @@ import {
   Alert,
   Button,
   Card,
-  DataTable,
   EmptyState,
   FormField,
   Input,
   PageHeader,
   Select,
   buttonClassName,
-  type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import {
   createTradeAgreement,
@@ -38,6 +41,7 @@ import {
   useResource,
   uuidPattern,
   type Failure,
+  useProcurementPages,
 } from "./parts";
 import type { LookupEntityKey } from "../../shell/lookup/entities";
 import { LookupFormField } from "../../shell/lookup/LookupFormField";
@@ -62,7 +66,7 @@ export function quantityBreak(t: Pick<TradeAgreement, "fromQty" | "toQty">): str
   return t.toQty ? `${t.fromQty} to under ${t.toQty}` : `${t.fromQty} and up`;
 }
 
-const listColumns: DataTableColumn<TradeAgreement>[] = [
+const listColumns: ListColumn<TradeAgreement>[] = [
   { key: "account", header: "Vendor", render: (t) => level(accountLabels[t.accountCode], t.accountId, t.accountCode === "VENDOR" ? "vendor" : t.accountCode === "GROUP" ? "vendorGroup" : undefined) },
   { key: "item", header: "Item", render: (t) => level(itemLabels[t.itemCode], t.itemId, t.itemCode === "PRODUCT" ? "product" : t.itemCode === "GROUP" ? "itemGroup" : undefined) },
   { key: "price", header: "Price", align: "end", render: (t) => `${money(t.price, t.currency)} / ${t.priceUnit} ${t.unit}` },
@@ -72,48 +76,41 @@ const listColumns: DataTableColumn<TradeAgreement>[] = [
   { key: "status", header: "Status", render: (t) => <StatusBadge status={t.status} /> },
 ];
 
+const listFilters: ListFilterDef[] = [
+  { kind: "entity", key: "accountId", label: "Vendor", entity: "vendor" },
+  { kind: "entity", key: "itemId", label: "Product", entity: "product" },
+];
+
+function useAgreementRows(query: ListQuery): ListData<TradeAgreement> {
+  const accountId = query.filters.accountId ?? "";
+  const itemId = query.filters.itemId ?? "";
+  return useProcurementPages(`${accountId}|${itemId}`, (cursor, signal) =>
+    listTradeAgreements({ accountId: accountId || undefined, itemId: itemId || undefined }, { cursor, signal }),
+  );
+}
+
 /** Trade agreement journal: every price row, newest first. */
 export function TradeAgreementsPage() {
   const navigate = useNavigate();
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<TradeAgreement[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listTradeAgreements({}, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Trade agreements"
-        description="Vendor price rows. The most specific valid row wins: vendor over group over all, product over group over all."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/trade-agreements/new">
-            New price row
-          </Link>
-        }
-      />
-      {page.error ? <LoadError what="trade agreements" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Trade agreements"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(t) => t.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No trade agreements yet", description: "Price rows you add here price purchase order lines automatically." }}
-        onRowOpen={(t) => navigate(`/purchasing/trade-agreements/${t.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-trade-agreements"
+      title="Trade agreements"
+      description="Vendor price rows. The most specific valid row wins: vendor over group over all, product over group over all."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/trade-agreements/new">
+          New price row
+        </Link>
+      }
+      noun="trade agreements"
+      singular="trade agreement"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useAgreementRows}
+      getRowKey={(t) => t.id}
+      onRowOpen={(t) => navigate(`/purchasing/trade-agreements/${t.id}`)}
+      empty={{ title: "No trade agreements yet", description: "Price rows you add here price purchase order lines automatically." }}
+    />
   );
 }
 

@@ -131,7 +131,8 @@ describe("requisition list", () => {
     renderAt("/purchasing/requisitions");
     await screen.findByRole("heading", { name: "No requisitions yet" });
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "APPROVED" } });
-    fireEvent.click(screen.getByLabelText("Only my requisitions"));
+    fireEvent.change(screen.getByLabelText("Raised by"), { target: { value: "true" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("/api/v1/procurement/requisitions?status=APPROVED&mine=true"));
   });
 });

@@ -1,12 +1,5 @@
 {
   "pages": [
-    "modules/purchasing/RequisitionPages.tsx",
-    "modules/purchasing/RfqPages.tsx",
-    "modules/purchasing/RfqTypePages.tsx",
-    "modules/purchasing/SchedulingPages.tsx",
-    "modules/purchasing/ServicePages.tsx",
-    "modules/purchasing/SigningPages.tsx",
-    "modules/purchasing/TradeAgreementPages.tsx",
     "modules/receivables/Cases.tsx",
     "modules/receivables/Deductions.tsx",
     "modules/receivables/Disputes.tsx",

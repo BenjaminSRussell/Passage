@@ -15,6 +15,11 @@ import {
   Textarea,
   buttonClassName,
   type DataTableColumn,
+  ListPage,
+  type ListColumn,
+  type ListData,
+  type ListFilterDef,
+  type ListQuery,
 } from "../../shell/ui";
 import {
   awardRFQ,
@@ -62,6 +67,7 @@ import {
   uuidPattern,
   type Failure,
   Named,
+  useProcurementPages,
 } from "./parts";
 import { AmendmentsPanel, EditDraftForm } from "./RfqAmend";
 import styles from "./pages.module.css";
@@ -76,7 +82,7 @@ function lineItem(l: { productId?: string; description?: string }) {
   return l.description ? l.description : <Named entity="product" id={l.productId} />;
 }
 
-const listColumns: DataTableColumn<RFQSummary>[] = [
+const listColumns: ListColumn<RFQSummary>[] = [
   { key: "number", header: "Number", mono: true },
   {
     key: "status",
@@ -94,72 +100,38 @@ const listColumns: DataTableColumn<RFQSummary>[] = [
   { key: "replyCount", header: "Replies", align: "end" },
 ];
 
+const listFilters: ListFilterDef[] = [
+  { kind: "select", key: "status", label: "Status", anyLabel: "All statuses", options: STATUSES.map((s) => ({ value: s, label: statusLabel(s) })) },
+];
+
+function useRFQRows(query: ListQuery): ListData<RFQSummary> {
+  const status = (query.filters.status ?? "") as RFQStatus | "";
+  return useProcurementPages(status, (cursor, signal) => listRFQs({ statuses: status ? [status] : [] }, { cursor, signal }));
+}
+
 /** RFQ list with a status filter and load-more paging. */
 export function RFQsPage() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<RFQStatus | "">("");
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [rows, setRows] = useState<RFQSummary[]>([]);
-  const page = useResource(
-    async (signal) => {
-      const result = await listRFQs({ statuses: status ? [status] : [] }, { cursor, signal });
-      setRows((prev) => (cursor ? [...prev, ...result.items] : result.items));
-      return result;
-    },
-    [status, cursor],
-  );
   return (
-    <div className={styles.stack}>
-      <PageHeader
-        title="Requests for quotation"
-        description="Ask several vendors to quote, compare their replies line by line, and award the winners as purchase orders."
-        actions={
-          <Link className={buttonClassName("primary")} to="/purchasing/rfqs/new">
-            New RFQ
-          </Link>
-        }
-      />
-      <div className={styles.toolbar}>
-        <div className={styles.filter}>
-          <FormField id="rfq-status-filter" label="Status">
-            {(control) => (
-              <Select
-                {...control}
-                value={status}
-                onChange={(e) => {
-                  setCursor(undefined);
-                  setStatus(e.target.value as RFQStatus | "");
-                }}
-              >
-                <option value="">All statuses</option>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {statusLabel(s)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </FormField>
-        </div>
-      </div>
-      {page.error ? <LoadError what="requests for quotation" error={page.error} onRetry={page.reload} /> : null}
-      <DataTable
-        label="Requests for quotation"
-        columns={listColumns}
-        rows={page.error ? [] : rows}
-        getRowKey={(r) => r.id}
-        loading={page.loading && rows.length === 0}
-        empty={{ title: "No requests for quotation yet", description: "Create one for the lines that need a vendor, then send it to the vendors you want quotes from." }}
-        onRowOpen={(r) => navigate(`/purchasing/rfqs/${r.id}`)}
-      />
-      {page.data?.nextCursor ? (
-        <div className={styles.actions}>
-          <Button loading={page.loading} onClick={() => setCursor(page.data?.nextCursor)}>
-            Load more
-          </Button>
-        </div>
-      ) : null}
-    </div>
+    <ListPage
+      id="purchasing-rfqs"
+      title="Requests for quotation"
+      description="Ask several vendors to quote, compare their replies line by line, and award the winners as purchase orders."
+      actions={
+        <Link className={buttonClassName("primary")} to="/purchasing/rfqs/new">
+          New RFQ
+        </Link>
+      }
+      noun="requests for quotation"
+      singular="request for quotation"
+      columns={listColumns}
+      filters={listFilters}
+      useRows={useRFQRows}
+      search={(r) => ({ number: r.number })}
+      getRowKey={(r) => r.id}
+      onRowOpen={(r) => navigate(`/purchasing/rfqs/${r.id}`)}
+      empty={{ title: "No requests for quotation yet", description: "Create one for the lines that need a vendor, then send it to the vendors you want quotes from." }}
+    />
   );
 }
 

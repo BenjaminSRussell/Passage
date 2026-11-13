@@ -308,6 +308,7 @@ describe("model service specifications", () => {
     await screen.findByText("No model service specifications yet");
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "INACTIVE" } });
     fireEvent.change(screen.getByLabelText("Code or name"), { target: { value: "maint" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === `${BASE}/model-service-specs?status=INACTIVE&q=maint`)).toBe(true));
     vi.unstubAllGlobals();
     stubFetch(() => problem(500, "COM-0500", "boom"));
