@@ -860,6 +860,7 @@ const party: Record<string, ProblemCatalogEntry> = {
   "PTY-DUP-LIKELY": { message: "A similar party already exists in this legal entity.", action: "Review the matching parties, or confirm it's a different one by giving a reason." },
   "PTY-STEWARD-INVALID": { message: "Some of the details you entered aren't valid.", action: "Check the fields marked in the form, correct them and try again." },
   "PTY-STEWARD-NOT-FOUND": { message: "We couldn't find that review task.", action: "Go back to the queue and choose a task again." },
+  "PTY-STEWARD-SELF": { message: "You overrode this duplicate check, so you cannot also resolve it.", action: "Ask another data steward to decide whether the records are the same party." },
   "PTY-STEWARD-RESOLVED": { message: "Someone has already resolved this review task.", action: "Refresh the queue to see its outcome." },
   "PTY-ELECTRONIC-INVALID": { message: "The email address, phone number or web address isn't valid.", action: "Correct the value and try again." },
   "PTY-VENDOR-EXISTS": { message: "This party is already a vendor in this legal entity, or the account number is taken.", action: "Open the existing vendor, or choose a different account number." },

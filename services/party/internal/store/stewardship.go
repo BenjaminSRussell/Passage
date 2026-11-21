@@ -22,6 +22,7 @@ const (
 	CodeStewardInvalid  = "PTY-STEWARD-INVALID"
 	CodeStewardNotFound = "PTY-STEWARD-NOT-FOUND"
 	CodeStewardResolved = "PTY-STEWARD-RESOLVED"
+	CodeStewardSelf     = "PTY-STEWARD-SELF"
 	StewardOpen         = "open"
 	StewardResolved     = "resolved"
 	MaxReasonLen        = 500
@@ -187,16 +188,19 @@ func (s *Postgres) ResolveStewardTask(ctx context.Context, taskID string, in Res
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		task, err = scanStewardTask(tx.QueryRow(ctx, `update steward_task set status = 'resolved', resolution = $3, resolution_reason = $4, resolved_by = $5, resolved_at = now()
-			where tenant_id = $1 and id = $2 and status = 'open' returning `+stewardColumns, caller.TenantID, id, in.Resolution, in.Reason, caller.UserID))
+			where tenant_id = $1 and id = $2 and status = 'open' and requested_by <> $5 returning `+stewardColumns, caller.TenantID, id, in.Resolution, in.Reason, caller.UserID))
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		var known bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from steward_task where tenant_id = $1 and id = $2)`, caller.TenantID, id).Scan(&known); err != nil {
+		var status, requestedBy string
+		if err := tx.QueryRow(ctx, `select status, requested_by from steward_task where tenant_id = $1 and id = $2`, caller.TenantID, id).Scan(&status, &requestedBy); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return stewardNotFound()
+			}
 			return err
 		}
-		if !known {
-			return stewardNotFound()
+		if status == "open" && requestedBy == caller.UserID {
+			return httpx.NewProblem(http.StatusForbidden, CodeStewardSelf, "the person who overrode the duplicate check cannot resolve its steward task")
 		}
 		return httpx.NewProblem(http.StatusConflict, CodeStewardResolved, "the steward task is already resolved")
 	})

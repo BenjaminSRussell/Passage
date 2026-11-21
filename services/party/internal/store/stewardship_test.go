@@ -186,8 +186,15 @@ func TestStewardTask_ListResolveOnceAndScope(t *testing.T) {
 	if _, err := s.ResolveStewardTask(ctxB, task.ID, in); problemCode(t, err) != store.CodeStewardNotFound {
 		t.Fatalf("resolve from another legal entity: %v", err)
 	}
-	resolved, err := s.ResolveStewardTask(ctxA, task.ID, in)
-	if err != nil || resolved.Status != store.StewardResolved || resolved.Resolution != "distinct" || resolved.ResolvedBy != "buyer" || resolved.ResolvedAt == nil {
+	if _, err := s.ResolveStewardTask(ctxA, task.ID, in); problemCode(t, err) != store.CodeStewardSelf {
+		t.Fatalf("the person who overrode resolved their own task: %v", err)
+	}
+	if open, err := s.ListStewardTasks(ctxA, store.StewardOpen); err != nil || len(open) != 1 {
+		t.Fatalf("open after a refused self-resolve = %+v, %v; want the task still open", open, err)
+	}
+	steward := asUser(1, legalEntityA, "steward")
+	resolved, err := s.ResolveStewardTask(steward, task.ID, in)
+	if err != nil || resolved.Status != store.StewardResolved || resolved.Resolution != "distinct" || resolved.ResolvedBy != "steward" || resolved.ResolvedAt == nil {
 		t.Fatalf("resolve = %+v, %v", resolved, err)
 	}
 	if _, err := s.ResolveStewardTask(ctxA, task.ID, in); problemCode(t, err) != store.CodeStewardResolved {
