@@ -11,6 +11,7 @@ import { GENERATED_BADGE } from "./domain";
 import { useCopilotConversation, type AskFn } from "./useCopilotConversation";
 
 const CONVERSATION_ID = "6f1c1f0e-8f0a-4a52-9a43-0a8c5a1f2b11";
+const ANSWER_HEADING_LEVEL = 3;
 const QUESTION = "what is the total of our overdue invoices over $10k?";
 
 const answer: ChatResponse = {
@@ -70,6 +71,14 @@ describe("AskAnswer", () => {
     await userEvent.setup().click(within(final).getByRole("button", { name: "Data used" }));
     expect(within(final).getByRole("list", { name: "Tools called" })).toHaveTextContent("analytics.query: OK");
     expect(within(final).getByRole("list", { name: "Sources" })).toHaveTextContent("Invoice INV-1042");
+    for (const name of ["Sources", "Tools called", "Records read"]) {
+      expect(within(final).getByRole("heading", { name, level: 4 })).toBeInTheDocument();
+    }
+    const levels = screen.getAllByRole("heading").map((h) => Number(h.tagName.slice(1)));
+    expect(levels[0]).toBe(ANSWER_HEADING_LEVEL);
+    levels.forEach((level, i) => {
+      expect(level - (levels[i - 1] ?? ANSWER_HEADING_LEVEL)).toBeLessThanOrEqual(1);
+    });
     expect(screen.getByRole("status")).toHaveTextContent("The copilot has finished answering.");
     expect(pageViolations()).toEqual([]);
   });

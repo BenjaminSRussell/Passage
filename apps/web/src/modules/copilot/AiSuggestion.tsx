@@ -24,6 +24,13 @@ export function AiMarking({ dataClass, excluded }: { dataClass?: string | undefi
   );
 }
 
+const PANEL_HEADING: Record<SuggestionHost, "h3" | "h4"> = {
+  answer: "h4",
+  "briefing-item": "h4",
+  proposal: "h4",
+  "feed-item": "h3",
+};
+
 export interface AiSuggestionProps {
   host: SuggestionHost;
   suggestion: SuggestionViewModel;
@@ -63,6 +70,7 @@ export function AiSuggestion({
   children,
 }: AiSuggestionProps) {
   const duties = usePrincipalDuties();
+  const Heading = PANEL_HEADING[host];
   const records = suggestion.records.map((record) =>
     resolveRecord(record, duties),
   );
@@ -93,13 +101,13 @@ export function AiSuggestion({
         )}
       </Disclosure>
       <Disclosure label="Data used">
-        <h4 className={styles.heading}>Tools called</h4>
+        <Heading className={styles.heading}>Tools called</Heading>
         <ul className={styles.list} aria-label="Tools called">
           {suggestion.tools.map((tool, i) => (
             <li key={`${tool}-${i}`}>{tool}</li>
           ))}
         </ul>
-        <h4 className={styles.heading}>Records read</h4>
+        <Heading className={styles.heading}>Records read</Heading>
         {records.length === 0 ? (
           <p>No source records were recorded for this suggestion.</p>
         ) : (
