@@ -3469,6 +3469,63 @@ test_copilot_use_opens_the_streamed_conversation_routes_and_nothing_else_under_a
 	not allowed("knowledge.write", "POST", "/api/v1/agents/copilot/conversations")
 }
 
+agents_api_ops := [
+	["GET", "/api/v1/agents/availability", {"mcp.copilot.use"}],
+	["GET", "/api/v1/agents/kill-switch", {"agents.admin", "platform.global.admin"}],
+	["POST", "/api/v1/agents/kill-switch", {"agents.admin", "platform.global.admin"}],
+	["GET", "/api/v1/agents/ai-data-policy", {"aipolicy.read"}],
+	["PUT", "/api/v1/agents/ai-data-policy", {"aipolicy.write"}],
+	["GET", "/api/v1/agents/approvals", {"agents.run.read"}],
+	["GET", "/api/v1/agents/approvals/a1", {"agents.run.read"}],
+	["POST", "/api/v1/agents/runs/r1/actions/a1/decision", {"agents.run.read"}],
+	["POST", "/api/v1/agents/runs/r1/actions/a1:undo", {"agents.run.read"}],
+	["POST", "/api/v1/agents/ap_coding/runs", {"agents.invoke"}],
+	["GET", "/api/v1/agents/runs/r1", {"agents.run.read"}],
+	["GET", "/api/v1/agents/runs/r1/actions", {"agents.run.read"}],
+	["POST", "/api/v1/agents/runs/r1/steps/plan", {"agents.run.workflow"}],
+	["POST", "/api/v1/knowledge/search", {"mcp.copilot.use"}],
+	["POST", "/api/v1/knowledge/chunks", {"knowledge.write"}],
+	["POST", "/api/v1/copilot/chat", {"mcp.copilot.use"}],
+	["POST", "/api/v1/agents/copilot/conversations", {"mcp.copilot.use"}],
+	["POST", "/api/v1/agents/copilot/conversations/c1/messages", {"mcp.copilot.use"}],
+	["GET", "/api/v1/agents/budgets", {"agentbudget.read"}],
+	["PUT", "/api/v1/agents/budgets/ap_coding", {"agentbudget.write"}],
+	["GET", "/api/v1/agents/definitions", {"agents.admin"}],
+	["POST", "/api/v1/agents/definitions/ap_coding:disable", {"agents.admin"}],
+	["POST", "/api/v1/agents/definitions/ap_coding:enable", {"agents.admin"}],
+	["POST", "/api/v1/agents/briefings:generate", {"agents.invoke"}],
+	["GET", "/api/v1/agents/briefings", {"agents.run.read"}],
+	["GET", "/api/v1/agents/briefings/b1", {"agents.run.read"}],
+	["POST", "/api/v1/agents/briefings/b1:mark-read", {"agents.run.read"}],
+]
+
+policy_ahead_of_service(method, path) := {"agents.admin"} if {
+	method == "GET"
+	path == "/api/v1/agents/budgets/ap_coding"
+} else := set()
+
+agents_api_grants(method, path) := grants if {
+	grants := granting_duties with input as {"action": method, "resource": path}
+}
+
+test_every_agents_api_operation_is_allowed_to_its_duties_alone if {
+	every op in agents_api_ops {
+		agents_api_grants(op[0], op[1]) == op[2]
+		every duty in op[2] {
+			allowed(duty, op[0], op[1])
+		}
+	}
+}
+
+test_every_agents_api_path_refuses_the_other_methods if {
+	every op in agents_api_ops {
+		path_methods := {o[0] | some o in agents_api_ops; o[1] == op[1]}
+		every method in {"GET", "POST", "PUT", "PATCH", "DELETE"} - path_methods {
+			agents_api_grants(method, op[1]) == policy_ahead_of_service(method, op[1])
+		}
+	}
+}
+
 test_opening_stock_and_bank_import_duties_are_service_only_and_cover_only_their_route if {
 	data.duties["inventory.import.write"].service_only
 	data.duties["inventory.import.read"].service_only
