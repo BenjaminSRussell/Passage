@@ -245,6 +245,8 @@ const payables: Record<string, ProblemCatalogEntry> = {
   "AP-BNK-001": { message: "Enter either an IBAN or a routing and account number, not both.", action: "Remove one of the two." },
   "AP-CRD-001": { message: "The credit is more than is left to credit on the invoice line.", action: "Lower the credit amount." },
   "AP-DUP-001": { message: "This invoice number has already been posted for the vendor.", action: "Check for a duplicate, or use the vendor's correct invoice number." },
+  "AP-MPX-001": { message: "This invoice exception has already been decided.", action: "Reload the page to see its current state." },
+  "AP-MPX-002": { message: "Only the person this exception was assigned to can decide it.", action: "Ask them to approve it. If they are no longer available, reject the audit block on the invoice and post it again; changing the policy owner does not move an exception that is already open." },
   "AP-PLN-001": { message: "This order line is invoiced through its invoicing plan, so it can't also be invoiced against a receipt.", action: "Invoice the plan rows instead." },
   "AP-QTY-001": { message: "The invoice quantity is more than has been received and not yet invoiced.", action: "Lower the quantity, or wait for the goods to be received." },
   "AP-SES-001": { message: "The service entry sheets would go over the order line value.", action: "Lower the sheet amount, or change the order line." },

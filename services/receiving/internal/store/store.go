@@ -196,6 +196,19 @@ type InvoiceOutcome struct {
 	Clearings     []decimal.Decimal
 	Event         events.Event
 	SelfBill      SelfBillBuild
+	Exception     *domain.MatchException
+}
+
+type InvoiceException struct {
+	InvoiceID      string
+	LegalEntityID  string
+	Assignee       string
+	Reasons        string
+	Status         string
+	CreatedAt      time.Time
+	DecidedBy      string
+	DecidedAt      *time.Time
+	DecisionReason string
 }
 
 type SelfBillBuild func(number string) (SelfBill, events.Event, error)
@@ -333,6 +346,10 @@ type Store interface {
 	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)
 	ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn ReleaseFunc) (Invoice, error)
 	RejectInvoice(ctx context.Context, id, legalEntityID, by, reason string, fn RejectFunc) (Invoice, error)
+	ApproveException(ctx context.Context, id, legalEntityID, by, reason string, fn ReleaseFunc) (Invoice, error)
+	SetMatchingPolicy(ctx context.Context, policy domain.MatchingPolicy, by string) error
+	ListMatchingPolicies(ctx context.Context, legalEntityID string) ([]domain.MatchingPolicy, error)
+	ListExceptions(ctx context.Context, legalEntityID, status string) ([]InvoiceException, error)
 	InvoiceVendor(ctx context.Context, id string) (string, error)
 	RejectedInvoiceCount(ctx context.Context, vendorID, number string) (int, error)
 	SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, by string, fn ErsVendorFunc) error

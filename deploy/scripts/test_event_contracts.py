@@ -130,7 +130,7 @@ UNRESOLVED_ROUTES = {
     (STORE.format("receiving", "servicesheet"), None, "AcceptSheet", "outbox.Enqueue(ctx, tx, aggregate, aggregateID, evt)"): (
         "the accepted sheet's events come from a slice and the aggregate from each event's type at run time",
         {"dev.depot.receiving.receipt.posted.v1": "receipt", "dev.depot.receiving.serviceentrysheet.decided.v1": "serviceentrysheet"}),
-    (STORE.format("receiving", "servicesheet"), STORE.format("receiving", "audit"), "ReleaseInvoice",
+    (STORE.format("receiving", "servicesheet"), STORE.format("receiving", "audit"), "release",
      "putSelfBill(ctx, tx, tenantID, inv, outcome.SelfBill)"): SELF_BILL,
     (STORE.format("receiving", "servicesheet"), STORE.format("receiving", "invoices"), "PostInvoice",
      "putSelfBill(ctx, tx, tenantID, in, outcome.SelfBill)"): SELF_BILL,

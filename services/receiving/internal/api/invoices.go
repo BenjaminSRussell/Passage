@@ -227,6 +227,10 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 		return store.Invoice{}, err
 	}
 	ratePct := policy.RatePct
+	exception, err := a.matchException(ctx, &in)
+	if err != nil {
+		return store.Invoice{}, err
+	}
 	if in.AuditReason == "" && a.ports.AuditSampler.Decide(in.ID, policy, invoiceAmount(in), in.Currency) {
 		in.AuditReason = auditReasonSample
 	}
@@ -254,7 +258,7 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 			}
 			total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
 			evt, err := invoiceSampledEvent(p.TenantID, in, total, ratePct)
-			return store.InvoiceOutcome{Total: total, Blocked: true, Clearings: entry.GrirCleared, Event: evt}, err
+			return store.InvoiceOutcome{Total: total, Blocked: true, Clearings: entry.GrirCleared, Event: evt, Exception: exception}, err
 		}
 		entry, err := a.PostInvoice(ctx, doc, a.ports.Profile)
 		if err != nil {
@@ -273,11 +277,33 @@ func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Princi
 	}
 	if blocked {
 		a.auditBlocked.Add(1)
+		if exception != nil {
+			a.exceptionsOpened.Add(1)
+		}
 		return posted, nil
 	}
 	a.pendingPostings.finish(invoiceSubjects(posted)...)
 	a.invoiced.Add(1)
 	return posted, nil
+}
+
+func (a *API) matchException(ctx context.Context, in *store.Invoice) (*domain.MatchException, error) {
+	policies, err := a.store.ListMatchingPolicies(ctx, in.LegalEntityID)
+	if err != nil || len(policies) == 0 {
+		return nil, err
+	}
+	match, err := a.matchInvoice(ctx, *in, policies)
+	if err != nil {
+		slog.ErrorContext(ctx, "invoice match could not be computed; nothing posted", "err", err, "invoiceId", in.ID, "correlationId", middleware.GetReqID(ctx))
+		return nil, err
+	}
+	if match.owner == "" || !domain.IsVariance(match.result.Status) {
+		return nil, nil
+	}
+	if in.AuditReason == "" {
+		in.AuditReason = domain.AuditReasonMatchException
+	}
+	return &domain.MatchException{Assignee: match.owner, Reasons: domain.ExceptionReasons(match.result)}, nil
 }
 
 type groupMemo map[string]domain.VendorGroupRef

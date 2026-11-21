@@ -184,14 +184,23 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	ctx := r.Context()
-	vendorID, err := a.store.InvoiceVendor(ctx, id)
+	released, err := a.releaseHeld(r.Context(), p, id, req.LegalEntityID, func(fn store.ReleaseFunc) (store.Invoice, error) {
+		return a.store.ReleaseInvoice(r.Context(), id, req.LegalEntityID, p.UserID, fn)
+	})
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	group := a.vendorGroup(ctx, nil, id, req.LegalEntityID, vendorID)
-	released, err := a.store.ReleaseInvoice(ctx, id, req.LegalEntityID, p.UserID, func(inv store.Invoice) (store.InvoiceOutcome, error) {
+	httpx.JSON(w, http.StatusOK, toInvoiceBody(released))
+}
+
+func (a *API) releaseHeld(ctx context.Context, p tenant.Principal, id, legalEntityID string, release func(store.ReleaseFunc) (store.Invoice, error)) (store.Invoice, error) {
+	vendorID, err := a.store.InvoiceVendor(ctx, id)
+	if err != nil {
+		return store.Invoice{}, err
+	}
+	group := a.vendorGroup(ctx, nil, id, legalEntityID, vendorID)
+	released, err := release(func(inv store.Invoice) (store.InvoiceOutcome, error) {
 		var parties domain.SelfBillParties
 		if inv.Source == domain.InvoiceSourceERS {
 			var err error
@@ -221,13 +230,12 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 		return outcome, err
 	})
 	if err != nil {
-		writeError(w, r, err)
-		return
+		return store.Invoice{}, err
 	}
 	a.pendingPostings.finish(invoiceSubjects(released)...)
 	a.auditReleased.Add(1)
 	a.invoiced.Add(1)
-	httpx.JSON(w, http.StatusOK, toInvoiceBody(released))
+	return released, nil
 }
 
 func (a *API) rejectAuditBlock(w http.ResponseWriter, r *http.Request) {

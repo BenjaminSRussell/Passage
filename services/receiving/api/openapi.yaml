@@ -1210,6 +1210,88 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/matching-policies:
+    put:
+      operationId: setMatchingPolicy
+      x-depot-duty: receiving.matching-policy.maintain
+      description: >-
+        Stores the matching policy of one scope in a legal entity: a vendor and an item, a vendor, an item, or the whole legal entity (both ids absent).
+        Invoice matching resolves the most specific scope that covers an invoice line (vendor x item, then vendor, then item, then legal entity) and falls
+        back to the built-in defaults when none is stored. Putting the same scope again replaces it. An invoice posted afterwards whose price, quantity or
+        total variance exceeds the resolved policy is held (status AUDIT_BLOCKED, reason "match exception") with an exception task for the policy's owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MatchingPolicyRequest' }
+      responses:
+        '200':
+          description: The stored policy scope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MatchingPolicy' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoice-exceptions:
+    get:
+      operationId: listInvoiceExceptions
+      x-depot-duty: receiving.ap.inquire
+      description: Invoice exceptions in the caller's legal entities, oldest first, at most 50. The status defaults to OPEN.
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [OPEN, APPROVED, REJECTED], default: OPEN } }
+        - { name: legalEntityId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The exceptions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/InvoiceException' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoice-exceptions/{id}:approve:
+    post:
+      operationId: approveInvoiceException
+      x-depot-duty: receiving.invoice-audit.release
+      description: >-
+        Approves the exception of a held invoice (the id is the invoice id) with a reason: the held invoice is released and posted exactly as
+        :release-audit-block does, and the exception becomes APPROVED. Only the owner of the matching policy that raised the exception can approve (AP-MPX-002),
+        and the user who posted the invoice cannot (AP-AUD-003).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApproveExceptionRequest' }
+      responses:
+        '200':
+          description: The released invoice (status POSTED).
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 including an empty reason.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003; AP-MPX-002 the caller does not own the policy; AP-AUD-003 the approver posted the invoice.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-005 no exception for the invoice.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'AP-MPX-001 the exception is already decided; AP-AUD-002; RCV-IDM-001; COM-0410.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; RCV-VAL-001 other legal entity; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/pending-postings:
     get:
       operationId: listPendingPostings
@@ -2320,6 +2402,46 @@ components:
         thresholdAmount: { type: string }
         thresholdCurrency: { type: string }
         ruleVersion: { type: integer, minimum: 1, description: Bumped whenever the rate or threshold changes; each invoice records the version its draw used. }
+    MatchingPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, ownerUserId]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        ownerUserId: { type: string, minLength: 1, maxLength: 200, description: The user who decides the exceptions this policy raises. }
+        policy: { $ref: '#/components/schemas/Policy' }
+    MatchingPolicy:
+      type: object
+      required: [id, legalEntityId, ownerUserId, matchLevel]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        ownerUserId: { type: string }
+        matchLevel: { type: string, enum: [NONE, TWO_WAY, THREE_WAY] }
+    ApproveExceptionRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, reason]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Must be the legal entity of the invoice. }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    InvoiceException:
+      type: object
+      required: [invoiceId, legalEntityId, assignee, reasons, status, createdAt]
+      properties:
+        invoiceId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        assignee: { type: string }
+        reasons: { type: string, description: 'The failing lines and totals, for example "line 1: PRICE_VARIANCE".' }
+        status: { type: string, enum: [OPEN, APPROVED, REJECTED] }
+        createdAt: { type: string, format: date-time }
+        decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+        decisionReason: { type: string }
     Status:
       type: string
       enum: [NOT_MATCHED, MATCHED, PRICE_VARIANCE, QTY_VARIANCE, TOTAL_VARIANCE, NO_RECEIPT, WAITING_RECEIPT]

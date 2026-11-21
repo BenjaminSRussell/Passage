@@ -2,7 +2,7 @@
   "version": 3,
   "compiler": "scripts/compile_architecture.py",
   "note": "Generated from the OpenAPI and AsyncAPI specs and scripts/architecture_patterns.json. Do not edit; run python3 scripts/compile_architecture.py --write.",
-  "summary": {"openapiDocuments": 65, "paths": 2659, "operations": 3288, "asyncapiDocuments": 61, "topics": 393, "topicsPublished": 391, "topicsSubscribed": 23, "patterns": 59},
+  "summary": {"openapiDocuments": 65, "paths": 2662, "operations": 3291, "asyncapiDocuments": 61, "topics": 393, "topicsPublished": 391, "topicsSubscribed": 23, "patterns": 59},
   "patterns": [
     {
       "id": "event-envelope",
@@ -3732,6 +3732,8 @@
         {"method": "GET", "path": "/v1/receiving/invoice-captures", "operationId": "listInvoiceCaptures", "duty": "receiving.ap.inquire"},
         {"method": "POST", "path": "/v1/receiving/invoice-captures", "operationId": "createInvoiceCapture", "duty": "receiving.vendor-invoice.post"},
         {"method": "GET", "path": "/v1/receiving/invoice-captures/{id}", "operationId": "getInvoiceCapture", "duty": "receiving.ap.inquire"},
+        {"method": "GET", "path": "/v1/receiving/invoice-exceptions", "operationId": "listInvoiceExceptions", "duty": "receiving.ap.inquire"},
+        {"method": "POST", "path": "/v1/receiving/invoice-exceptions/{id}:approve", "operationId": "approveInvoiceException", "duty": "receiving.invoice-audit.release"},
         {"method": "GET", "path": "/v1/receiving/invoice-submissions", "operationId": "listInvoiceSubmissions", "duty": "receiving.ap.inquire"},
         {"method": "GET", "path": "/v1/receiving/invoice-submissions/{id}", "operationId": "getInvoiceSubmission", "duty": "receiving.ap.inquire"},
         {"method": "POST", "path": "/v1/receiving/invoice-submissions/{id}:reject", "operationId": "rejectInvoiceSubmission", "duty": "receiving.vendor-invoice.post"},
@@ -3741,6 +3743,7 @@
         {"method": "POST", "path": "/v1/receiving/invoices/{id}:reject-audit-block", "operationId": "rejectInvoiceAuditBlock", "duty": "receiving.invoice-audit.release"},
         {"method": "POST", "path": "/v1/receiving/invoices/{id}:release-audit-block", "operationId": "releaseInvoiceAuditBlock", "duty": "receiving.invoice-audit.release"},
         {"method": "POST", "path": "/v1/receiving/invoices:post", "operationId": "postVendorInvoice", "duty": "receiving.vendor-invoice.post"},
+        {"method": "PUT", "path": "/v1/receiving/matching-policies", "operationId": "setMatchingPolicy", "duty": "receiving.matching-policy.maintain"},
         {"method": "POST", "path": "/v1/receiving/matching:evaluate", "operationId": "evaluateMatching", "duty": "receiving.matching-policy.maintain"},
         {"method": "POST", "path": "/v1/receiving/one-time-payees", "operationId": "createOneTimePayee", "duty": "receiving.vendor-invoice.post"},
         {"method": "POST", "path": "/v1/receiving/one-time-payees:erase", "operationId": "eraseOneTimePayees", "duty": "receiving.payee.erase"},
