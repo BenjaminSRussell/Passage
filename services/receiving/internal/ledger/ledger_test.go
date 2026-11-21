@@ -212,6 +212,21 @@ func TestPost_Failures(t *testing.T) {
 	}
 }
 
+func TestPost_ZeroAmountLineIsSkippedAndTheEntryStillPosts(t *testing.T) {
+	client, _, raw := serve(t, http.StatusCreated, `{"journalEntryId":"je-9"}`)
+	entry := testEntry()
+	entry.Lines = append(entry.Lines, domain.JournalLine{Account: "2100", Amount: money.Must("0", "USD")})
+	id, err := client.Post(testCtx(), entry)
+	if err != nil || id != "je-9" {
+		t.Fatalf("id %q err %v", id, err)
+	}
+	var got ledgerPostEntryRequest
+	strictDecode(t, *raw, &got)
+	if len(got.Lines) != 2 {
+		t.Fatalf("lines %+v, want the zero line dropped", got.Lines)
+	}
+}
+
 func TestPost_TimeoutIsNotPeriodClosed(t *testing.T) {
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))

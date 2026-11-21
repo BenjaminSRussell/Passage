@@ -80,6 +80,9 @@ func toEntry(entry domain.JournalEntry) (ledgerclient.Entry, error) {
 		if l.Account == "" || l.Amount.Currency != currency {
 			return ledgerclient.Entry{}, fmt.Errorf("journal line %d needs an account and currency %s", i+1, currency)
 		}
+		if l.Amount.Value.IsZero() {
+			continue
+		}
 		out.Lines = append(out.Lines, ledgerclient.Line{Account: l.Account, Credit: l.Amount.Value.IsNegative(), Amount: l.Amount.Value.Abs(), Dimensions: l.Dimensions})
 	}
 	return out, nil

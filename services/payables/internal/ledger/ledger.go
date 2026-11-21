@@ -326,9 +326,12 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 	if c.posterErr != nil {
 		return "", c.posterErr
 	}
-	lines := make([]ledgerclient.Line, len(e.Lines))
-	for i, l := range e.Lines {
-		lines[i] = ledgerclient.Line{Account: l.Account, Credit: l.Credit, Amount: l.Amount, Text: l.Text, Dimensions: l.Dimensions, TradingPartnerID: l.TradingPartnerID}
+	lines := make([]ledgerclient.Line, 0, len(e.Lines))
+	for _, l := range e.Lines {
+		if l.Amount.IsZero() {
+			continue
+		}
+		lines = append(lines, ledgerclient.Line{Account: l.Account, Credit: l.Credit, Amount: l.Amount, Text: l.Text, Dimensions: l.Dimensions, TradingPartnerID: l.TradingPartnerID})
 	}
 	id, err := c.poster.Post(ctx, ledgerclient.Entry{LegalEntityID: e.LegalEntityID, LedgerID: e.LedgerID, DocumentID: e.DocumentID, PostingDate: e.PostingDate,
 		Currency: e.Currency, IdempotencyKey: e.IdempotencyKey, SourceType: e.SourceType, Lines: lines, OptionalDimensions: e.OptionalDimensions})
