@@ -47,19 +47,21 @@ type Sequencer interface {
 }
 
 type API struct {
-	pinger    Pinger
-	parties   store.Store
-	credit    store.CreditStore
-	vendors   store.VendorStore
-	customers store.CustomerStore
-	suppliers store.SupplierStore
-	portal    store.PortalStore
-	setup     store.SetupStore
-	terms     store.TermStore
-	merges    MergeStore
-	taxRegs   store.TaxRegistrationStore
-	search    store.SearchStore
-	sequence  Sequencer
+	pinger     Pinger
+	parties    store.Store
+	credit     store.CreditStore
+	vendors    store.VendorStore
+	customers  store.CustomerStore
+	suppliers  store.SupplierStore
+	portal     store.PortalStore
+	setup      store.SetupStore
+	terms      store.TermStore
+	merges     MergeStore
+	taxRegs    store.TaxRegistrationStore
+	search     store.SearchStore
+	steward    store.StewardStore
+	electronic store.ElectronicStore
+	sequence   Sequencer
 
 	creditCounts     creditMetrics
 	mergeCounts      mergeMetrics
@@ -71,6 +73,9 @@ type API struct {
 	statuses         map[domain.Status]*atomic.Int64
 	rejected         atomic.Int64
 	failures         atomic.Int64
+	dupBlocked       atomic.Int64
+	dupOverridden    atomic.Int64
+	stewardResolved  atomic.Int64
 }
 
 type validateRequest struct {
@@ -145,6 +150,9 @@ func (a *API) Register(r chi.Router) {
 	if a.search != nil {
 		a.registerSearch(r)
 	}
+	if a.steward != nil {
+		a.registerStewardship(r)
+	}
 }
 
 func (a *API) Metrics() http.Handler {
@@ -160,6 +168,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP party_parties_created_total Parties created; an idempotent replay is not counted.\n# TYPE party_parties_created_total counter\nparty_parties_created_total %d\n", a.created.Load())
 		fmt.Fprintf(w, "# HELP party_vendor_roles_created_total Vendor roles created; an idempotent replay is not counted.\n# TYPE party_vendor_roles_created_total counter\nparty_vendor_roles_created_total %d\n", a.vendorsCreated.Load())
 		fmt.Fprintf(w, "# HELP party_customer_roles_created_total Customer roles created; an idempotent replay is not counted.\n# TYPE party_customer_roles_created_total counter\nparty_customer_roles_created_total %d\n", a.customersCreated.Load())
+		fmt.Fprintf(w, "# HELP party_duplicate_checks_total Vendor creates stopped by the duplicate check (blocked) or sent with an override reason (overridden).\n# TYPE party_duplicate_checks_total counter\nparty_duplicate_checks_total{outcome=\"blocked\"} %d\nparty_duplicate_checks_total{outcome=\"overridden\"} %d\n", a.dupBlocked.Load(), a.dupOverridden.Load())
+		fmt.Fprintf(w, "# HELP party_steward_tasks_resolved_total Steward tasks resolved.\n# TYPE party_steward_tasks_resolved_total counter\nparty_steward_tasks_resolved_total %d\n", a.stewardResolved.Load())
 		fmt.Fprintf(w, "# HELP party_merges_total Party merges completed (approved merge requests).\n# TYPE party_merges_total counter\nparty_merges_total %d\n", a.merged.Load())
 		m := &a.mergeCounts
 		fmt.Fprintf(w, "# HELP party_merge_requests_total Merge requests by outcome: requested, approved, rejected; replays are not counted.\n# TYPE party_merge_requests_total counter\nparty_merge_requests_total{outcome=\"requested\"} %d\nparty_merge_requests_total{outcome=\"approved\"} %d\nparty_merge_requests_total{outcome=\"rejected\"} %d\n",

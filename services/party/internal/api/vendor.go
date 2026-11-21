@@ -66,15 +66,28 @@ func (a *API) createVendor(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, p)
 		return
 	}
+	reason, err := overrideReason(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
 	vendor, created, err := a.vendors.CreateVendorRole(r.Context(), chi.URLParam(r, "id"), store.NewVendorRole{
-		In: req, Key: r.Header.Get(idempotencyKeyHeader), Hash: domain.RequestHash(req),
+		In: req, Key: r.Header.Get(idempotencyKeyHeader), Hash: domain.RequestHash(req), OverrideReason: reason,
 	})
+	if dup, ok := asDuplicate(err); ok {
+		a.dupBlocked.Add(1)
+		failDuplicate(w, r, dup)
+		return
+	}
 	if err != nil {
 		failParty(w, r, err)
 		return
 	}
 	if created {
 		a.vendorsCreated.Add(1)
+		if reason != "" {
+			a.dupOverridden.Add(1)
+		}
 	}
 	httpx.JSON(w, http.StatusCreated, vendor)
 }

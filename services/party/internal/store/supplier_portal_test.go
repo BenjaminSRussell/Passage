@@ -165,7 +165,7 @@ func TestInvite_TokenIsShownOnceVerifiedWithoutSpendingAndAcceptedOnce(t *testin
 		}
 	}
 	d, err := r.s.VerifyInvite(r.buyer, r.vendorA, token)
-	if err != nil || d.Email != "colleague@acme.example" || d.VendorName != "Acme" || d.Status != domain.InvitePending {
+	if err != nil || d.Email != "colleague@acme.example" || d.VendorName != "P-A" || d.Status != domain.InvitePending {
 		t.Fatalf("verify %+v %v", d, err)
 	}
 	if _, err := r.s.VerifyInvite(r.buyer, r.vendorA, token); err != nil {

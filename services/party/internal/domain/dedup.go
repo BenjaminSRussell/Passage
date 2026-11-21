@@ -26,6 +26,8 @@ type PartyRecord struct {
 	Street  string
 	Postal  string
 	Country string
+	Emails  []string
+	Phones  []string
 }
 
 type Match struct {
@@ -165,6 +167,21 @@ func BlockKeys(p PartyRecord) []string {
 	}
 	if street, postal := normalizeStreet(p.Street), Normalize(p.Postal); street != "" && postal != "" {
 		keys = append(keys, "a:"+postal+"|"+street)
+	}
+	for _, email := range p.Emails {
+		if email = strings.ToLower(strings.TrimSpace(email)); email != "" {
+			keys = append(keys, "e:"+email)
+		}
+	}
+	for _, phone := range p.Phones {
+		if digits := strings.Map(func(r rune) rune {
+			if unicode.IsDigit(r) {
+				return r
+			}
+			return -1
+		}, phone); digits != "" {
+			keys = append(keys, "p:"+digits)
+		}
 	}
 	return keys
 }

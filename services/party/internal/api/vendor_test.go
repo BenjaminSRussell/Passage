@@ -20,6 +20,7 @@ type fakeVendors struct {
 	partyID string
 	key     string
 	hash    string
+	reason  string
 	banked  domain.NewBankAccount
 	reveal  bool
 	err     error
@@ -27,7 +28,7 @@ type fakeVendors struct {
 
 func (f *fakeVendors) CreateVendorRole(_ context.Context, partyID string, role store.NewVendorRole) (domain.Vendor, bool, error) {
 	in := role.In
-	f.partyID, f.created, f.key, f.hash = partyID, in, role.Key, role.Hash
+	f.partyID, f.created, f.key, f.hash, f.reason = partyID, in, role.Key, role.Hash, role.OverrideReason
 	return domain.Vendor{ID: knownID, PartyID: partyID, VendorGroupID: in.VendorGroupID, AccountNumber: in.AccountNumber, CurrencyCode: in.CurrencyCode, Blocked: "none", Version: 1}, f.err == nil, f.err
 }
 
