@@ -40,9 +40,10 @@ const (
 // NewVendorRole is a vendor role to add; Key and Hash carry the optional
 // Idempotency-Key and the hash of the request body.
 type NewVendorRole struct {
-	In   domain.NewVendor
-	Key  string
-	Hash string
+	In             domain.NewVendor
+	Key            string
+	Hash           string
+	OverrideReason string
 }
 
 type VendorStore interface {
@@ -138,6 +139,9 @@ func (s *Postgres) createVendorOnce(ctx context.Context, partyID string, in NewV
 		}
 		if status == "merged" {
 			return httpx.NewProblem(http.StatusConflict, CodePartyMerged, "party was merged; add the vendor role to the surviving party")
+		}
+		if err := s.checkDuplicates(ctx, tx, caller, scopes[0], id, domain.RoleVendor, in.OverrideReason); err != nil {
+			return err
 		}
 		v, err = scanVendor(tx.QueryRow(ctx, `insert into vendor_role (tenant_id, id, party_id, legal_entity_id, account_number, vendor_group_id, payment_term_id, currency_code, idempotency_key)
 			values ($1, $2, $3, $4, $5, $6, $7::text::uuid, $8, $9) returning `+vendorColumns,

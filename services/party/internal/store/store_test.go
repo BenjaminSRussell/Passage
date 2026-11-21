@@ -43,7 +43,7 @@ func insertParty(ctx context.Context, app *pgxpool.Pool, tenantID, number string
 	id := ids.New()
 	err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `insert into party (tenant_id, id, party_number, party_type, name, search_name, org_legal_name)
-			values ($1, $2, $3, 'organization', 'Acme', 'acme', 'Acme')`, tenantID, id, number)
+			values ($1, $2, $3, 'organization', $3, lower($3), 'Acme')`, tenantID, id, number)
 		return err
 	})
 	return id, err

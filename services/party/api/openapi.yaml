@@ -129,12 +129,17 @@ paths:
       operationId: createVendorRole
       x-depot-duty: party.write
       x-depot-duty-alternatives: [party.import.write]
-      description: Adds the vendor role to a party in the caller's single legal entity. A replay with the same Idempotency-Key and body (for the same party and legal entity) returns the original role; the same key with another body is 409 idempotency_key_reuse. 409 PTY-VENDOR-EXISTS when the party already has one there or the account number is taken; 409 PTY-PARTY-MERGED for a merged party; 422 PTY-LEGAL-ENTITY-REQUIRED without exactly one legal entity.
+      description: Adds the vendor role to a party in the caller's single legal entity. A replay with the same Idempotency-Key and body (for the same party and legal entity) returns the original role; the same key with another body is 409 idempotency_key_reuse. 409 PTY-VENDOR-EXISTS when the party already has one there or the account number is taken; 409 PTY-PARTY-MERGED for a merged party; 422 PTY-LEGAL-ENTITY-REQUIRED without exactly one legal entity. 409 PTY-DUP-LIKELY, with a candidates list (partyId, partyNumber, name, weight, class), when a vendor in the legal entity matches the party at the possible-duplicate weight or above and no X-Duplicate-Override-Reason is sent; with the header the role is created and an open steward task is queued. An empty or over-500-character header is 422 PTY-STEWARD-INVALID.
       parameters:
         - name: Idempotency-Key
           in: header
           required: false
           description: Makes a retry return the original role.
+          schema: { type: string }
+        - name: X-Duplicate-Override-Reason
+          in: header
+          required: false
+          description: Accepts the duplicate candidates and queues a steward task; 1 to 500 characters.
           schema: { type: string }
       requestBody:
         required: true
@@ -147,6 +152,66 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PTY-PARTY-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/party/parties/{id}/electronic-addresses:
+    parameters:
+      - { name: id, in: path, required: true, description: Party id., schema: { type: string, format: uuid } }
+    post:
+      operationId: addElectronicAddress
+      x-depot-duty: party.write
+      description: Stores an email, phone or URL for a party in the caller's single legal entity; the same normalized value is returned unchanged on a repeat. It is a duplicate blocking key. 422 PTY-ELECTRONIC-INVALID with per-field errors; 422 PTY-LEGAL-ENTITY-REQUIRED without exactly one legal entity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [kind, value], properties: { kind: { type: string, enum: [email, phone, url] }, value: { type: string } } }
+      responses:
+        '201': { description: The stored address., content: { application/json: { schema: { $ref: '#/components/schemas/ElectronicAddress' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PTY-PARTY-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listElectronicAddresses
+      x-depot-duty: party.read
+      description: Lists the party's electronic addresses visible in the caller's legal-entity scope.
+      responses:
+        '200': { description: The addresses., content: { application/json: { schema: { type: object, properties: { electronicAddresses: { type: array, items: { $ref: '#/components/schemas/ElectronicAddress' } } } } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PTY-PARTY-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/party/steward-tasks:
+    get:
+      operationId: listStewardTasks
+      x-depot-duty: party.read
+      description: Lists steward tasks in the caller's legal-entity scope, oldest first, at most 100. The status query is open (default) or resolved; any other value is 422 PTY-STEWARD-INVALID.
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [open, resolved] } }
+      responses:
+        '200': { description: The tasks., content: { application/json: { schema: { type: object, properties: { stewardTasks: { type: array, items: { $ref: '#/components/schemas/StewardTask' } } } } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/party/steward-tasks/{id}:resolve:
+    parameters:
+      - { name: id, in: path, required: true, description: Steward task id., schema: { type: string, format: uuid } }
+    post:
+      operationId: resolveStewardTask
+      x-depot-duty: party.write
+      description: Records the steward's decision, distinct or duplicate, with a reason. It does not merge; a merge is requested through the merge-requests flow. 409 PTY-STEWARD-RESOLVED when already resolved; 404 PTY-STEWARD-NOT-FOUND; 422 PTY-STEWARD-INVALID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [resolution, reason], properties: { resolution: { type: string, enum: [distinct, duplicate] }, reason: { type: string, maxLength: 500 } } }
+      responses:
+        '200': { description: The resolved task., content: { application/json: { schema: { $ref: '#/components/schemas/StewardTask' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PTY-STEWARD-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
   /v1/party/parties/{id}/customer:
@@ -1922,6 +1987,42 @@ components:
         code: { type: string, pattern: '^[A-Z0-9_-]{1,10}$' }
         name: { type: string }
         version: { type: integer }
+    ElectronicAddress:
+      type: object
+      required: [id, partyId, legalEntityId, kind, value]
+      properties:
+        id: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        kind: { type: string, enum: [email, phone, url] }
+        value: { type: string }
+    StewardTask:
+      type: object
+      required: [id, partyId, legalEntityId, role, candidates, overrideReason, status, requestedBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        role: { type: string, enum: [vendor, customer] }
+        candidates:
+          type: array
+          items:
+            type: object
+            required: [partyId, partyNumber, name, weight, class]
+            properties:
+              partyId: { type: string, format: uuid }
+              partyNumber: { type: string }
+              name: { type: string }
+              weight: { type: number }
+              class: { type: string, enum: [likely_duplicate, possible] }
+        overrideReason: { type: string }
+        status: { type: string, enum: [open, resolved] }
+        resolution: { type: string, enum: [distinct, duplicate] }
+        resolutionReason: { type: string }
+        requestedBy: { type: string }
+        resolvedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
     NewVendor:
       type: object
       additionalProperties: false
