@@ -65,9 +65,9 @@ response shows "Copilot is unavailable (HTTP <status>)".
 
 ## Needs
 
-- Web BFF (shell owner, wave 5): forward `/api/v1/agents/kill-switch` to the
+- API gateway (shell owner, wave 5): forward `/api/v1/agents/kill-switch` to the
   agent runtime with the edge identity headers.
-- Web BFF (shell owner, wave 5): forward `POST /api/v1/mcp` to the MCP gateway's
+- API gateway (shell owner, wave 5): forward `POST /api/v1/mcp` to the MCP gateway's
   `POST /mcp` (services/mcp-ts/api/openapi.yaml) with the user's token.
 - The chat endpoint is served by the copilot BFF, which is a later slice (see
   NOT-IMPLEMENTED.md). Until both exist the pages show their error state.

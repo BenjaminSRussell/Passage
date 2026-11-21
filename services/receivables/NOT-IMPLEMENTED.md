@@ -88,9 +88,9 @@ owner or a kernel change).
 - **FR-30.6 Aging worklist and nightly job.** Snapshot and risk-ranked worklist on demand are built. The 01:30 job and invoice-date basis are not. Saved worklist filters and "log contact" / "hold order" actions are not built.
 - **FR-30.11 Return orders (RMA).** Built in sales (`/v1/sales/return-orders`) and here (`POST /rma-credits`) for CREDIT_ONLY and RETURN_TO_STOCK: authorize, receive, inspect, disposition, credit note with restocking and Dr 4000 / Cr 4200 / Cr 1200. Tax lines are built (original invoice tax reversed per code). Not built: other dispositions, warehouse quarantine, quality inspection documents.
 - **FR-30.13 Statements.** On-demand open-item statement built (slice 5); PDF, monthly job and delivery are not (see deliverable 4).
-- **FR-30.14 Customer portal.** Not built (see `apps/customer-portal/README.md`).
+- **FR-30.14 Customer portal.** Built (see `apps/customer-portal/README.md` and `services/customer-portal-ts/NOT-IMPLEMENTED.md`).
 - **FR-30.15 Phase-exit simulation.** Handoff to testing-reconciliation.
-- **FR-30.23 to FR-30.26.** Not built (see the deliverables table).
+- **FR-30.23 to FR-30.26.** Not built (see the deliverables table). FR-30.25 is portal guided configuration and FR-30.26 is returnable packaging charges; the portal's card payment and PDF download are FR-30.14.
 
 ## Payment lifecycle not in this slice
 

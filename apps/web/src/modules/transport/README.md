@@ -1,6 +1,6 @@
 # transport web module (wave 34, DPT-34)
 
-Screens for the transport service (`services/transport`), through the web BFF at
+Screens for the transport service (`services/transport`), through the API gateway at
 `/api/v1/transport` (service routes `/v1/transport/...`).
 
 | Route | Page | Duty |
