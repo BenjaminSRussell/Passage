@@ -12,7 +12,9 @@ const ANOMALY_DUTIES = "agents.invoke,ledger.journal.read,ledger.account.read";
 const ADMIN = "agents.admin";
 const PROPOSE = "depot.ap.invoice.propose_coding";
 const DEFINITIONS = "/api/v1/agents/definitions";
-const FACT_TIME = "2026-11-19T09:00:00.000Z";
+// Relative to the real clock: the briefing service reads Date.now(), and a fixed date eventually falls
+// inside the 24 h expiry horizon, which lists the pending item as a risk too and breaks the counts below.
+const FACT_TIME = new Date(Date.now() - 3_600_000).toISOString();
 
 class MemoryDefinitions implements AgentDefinitionStore {
   readonly rows = new Map<string, DisabledRow>();
