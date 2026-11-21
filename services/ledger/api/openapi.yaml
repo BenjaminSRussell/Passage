@@ -143,6 +143,19 @@ components:
         module: { type: string, minLength: 1, maxLength: 20, description: The close module that governs the source (all for "*") }
         status: { type: string, enum: [open, on_hold, closed, permanently_closed, never_opened] }
         openUntil: { type: string, format: date-time, description: Expiry of a temporary reopen; from then on open and on_hold are refused as closed }
+    PostingRequest:
+      type: object
+      required: [key, status, ledgerId, entryId, documentNumber, violationCode, createdAt, updatedAt]
+      description: What the ledger recorded for one posting key (D30, B-47b)
+      properties:
+        key: { type: string, minLength: 1, maxLength: 128 }
+        status: { type: string, enum: [received, posted, rejected], description: "posted rows carry entryId; rejected rows carry the first violation code; the ledger writes only posted and rejected" }
+        ledgerId: { type: string, format: uuid }
+        entryId: { type: string, format: uuid, nullable: true }
+        documentNumber: { type: string, nullable: true, description: The voucher of the entry a posted row points at }
+        violationCode: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     Violation:
       type: object
       required: [code, message]
@@ -4815,3 +4828,27 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
+  /v1/ledger/posting-requests/{key}:
+    get:
+      tags: [journal]
+      operationId: getPostingRequest
+      summary: Get what the ledger recorded for a posting key
+      x-depot-duty: ledger.journal.read
+      description: |
+        The posting-request registry (D30). A posted row is written in the posting transaction, so a key whose
+        post committed always answers `posted` with its entry; a post that was refused answers `rejected` with the
+        first violation code, until a later retry of the key posts and the row becomes `posted`. A key the ledger
+        has not seen, one outside the caller's legal-entity scope and one longer than 128 characters are 404
+        LEDGER_POSTING_REQUEST_NOT_FOUND. The key is matched exactly as sent. Callers holding ledger.entry.post may
+        read it as well.
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        "200":
+          description: The registry row
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostingRequest" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }

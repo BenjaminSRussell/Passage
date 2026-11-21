@@ -163,6 +163,7 @@ func (a *API) Register(r chi.Router) {
 		a.registerSplitting(r)
 		a.registerRealignment(r)
 		a.registerPeriodLocks(r)
+		a.registerPostingRequests(r)
 	})
 }
 

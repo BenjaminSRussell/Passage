@@ -39,7 +39,8 @@ type fakeStore struct {
 	realign realignFake
 	attach  attachFake
 	// locks records the period locks the handler passed down (B-08c).
-	locks []store.PeriodLockInput
+	locks           []store.PeriodLockInput
+	postingRequests map[string]store.PostingRequest
 	// putTags are the If-Match tags the configuration PUT handlers passed to the store; listPage the
 	// keyset page of the last paged list; batchPage and clearingPage canned look-ahead pages.
 	putTags      []int
@@ -391,6 +392,16 @@ func (f *fakeStore) PutPeriodLock(_ context.Context, in store.PeriodLockInput) (
 	f.locks = append(f.locks, in)
 	return store.PeriodLock{LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID, StartDate: in.Start.Format(time.DateOnly),
 		EndDate: in.End.Format(time.DateOnly), Version: in.Version, Sources: in.Sources}, nil
+}
+
+func (f *fakeStore) GetPostingRequest(_ context.Context, key string) (store.PostingRequest, error) {
+	if f.err != nil {
+		return store.PostingRequest{}, f.err
+	}
+	if pr, ok := f.postingRequests[key]; ok {
+		return pr, nil
+	}
+	return store.PostingRequest{}, httpx.NewProblem(http.StatusNotFound, store.CodePostingRequestNotFound, "no posting request is recorded for this key")
 }
 
 func server(fs *fakeStore) http.Handler {
