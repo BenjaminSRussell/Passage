@@ -249,8 +249,8 @@ func TestGLPostings_InvoiceJournalIsOneBalancedEntryAndCreditNoteMirrorsIt(t *te
 	}
 	e := g.entryFor(t, id)
 	want := map[string]string{"Dr 1200": "3595.00", "Cr 2400": "3000.00", "Cr 4000": "500.00", "Cr 2300": "95.00"}
-	if e.IdempotencyKey != "billing-invoice-"+id || e.SourceType != "billing_invoice" || e.LedgerID != g.ledgerID || e.PostingDate != "2027-03-12" || !sameAmounts(lineAmounts(e), want) {
-		t.Errorf("entry %+v amounts %v, want %v keyed billing-invoice-%s", e, lineAmounts(e), want, id)
+	if e.IdempotencyKey != "post:billing:invoice:"+id+":post" || e.SourceType != "billing_invoice" || e.LedgerID != g.ledgerID || e.PostingDate != "2027-03-12" || !sameAmounts(lineAmounts(e), want) {
+		t.Errorf("entry %+v amounts %v, want %v keyed post:billing:invoice:%s:post", e, lineAmounts(e), want, id)
 	}
 
 	rec := do(g.handler, http.MethodPost, "/v1/billing/credit-notes", "cn-gl", creditBody(id, "2027-03-20", ""))
@@ -266,7 +266,7 @@ func TestGLPostings_InvoiceJournalIsOneBalancedEntryAndCreditNoteMirrorsIt(t *te
 	}
 	mirror := g.entryFor(t, cn.ID)
 	wantMirror := map[string]string{"Cr 1200": "3595.00", "Dr 2400": "3000.00", "Dr 4000": "500.00", "Dr 2300": "95.00"}
-	if mirror.IdempotencyKey != "billing-credit-note-"+cn.ID || !sameAmounts(lineAmounts(mirror), wantMirror) {
+	if mirror.IdempotencyKey != "post:billing:creditnote:"+cn.ID+":post" || !sameAmounts(lineAmounts(mirror), wantMirror) {
 		t.Errorf("credit note entry %+v amounts %v, want %v", mirror, lineAmounts(mirror), wantMirror)
 	}
 	if b := g.balance(t, "2400"); !b.Net().IsZero() {

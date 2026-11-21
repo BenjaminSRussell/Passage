@@ -366,7 +366,7 @@ func (s *Postgres) RunClose(ctx context.Context, ledger ledgerclient.Ledger, in 
 	entryID := ""
 	if !total.IsZero() {
 		entryID, err = s.postVoucher(ctx, ledger, voucher{legalEntityID: c.LegalEntityID, sourceKey: "close:" + c.ID, glLedgerID: profile.GLLedgerID,
-			currency: c.Currency, date: c.PeriodEnd, key: "costing-close:" + c.ID, lines: domain.CloseVoucher(profile.accounts(), total)})
+			currency: c.Currency, date: c.PeriodEnd, key: voucherKey("close:" + c.ID), lines: domain.CloseVoucher(profile.accounts(), total)})
 		if err != nil {
 			slog.ErrorContext(ctx, "costing close voucher failed", "close", c.ID, "code", glCode(err), "err", err, "correlationId", middleware.GetReqID(ctx))
 			return Close{}, err

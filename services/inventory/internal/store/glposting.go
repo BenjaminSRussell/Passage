@@ -29,7 +29,6 @@ const (
 	MaxGLAttempts       = 5
 
 	glSourceType   = "inventory-journal"
-	glKeyPrefix    = "inventory-journal:"
 	glPosted       = "POSTED"
 	glParked       = "PARKED"
 	glBackoffSecs  = 60
@@ -69,6 +68,10 @@ type GLPostResult struct {
 	Parked   int        `json:"parked"`
 }
 
+func glKey(journalID string) string {
+	return ledgerclient.MustPostingKey("inventory", "journal", journalID, "post")
+}
+
 // glCandidate is a POSTED journal whose stored GL entry no confirmed posting covers.
 type glCandidate struct {
 	journalID, date string
@@ -79,7 +82,7 @@ type glCandidate struct {
 // stored order, under the journal's idempotency key.
 func (c glCandidate) ledgerEntry(legalEntityID, ledgerID string) ledgerclient.Entry {
 	e := ledgerclient.Entry{LegalEntityID: legalEntityID, LedgerID: ledgerID, DocumentID: c.journalID, PostingDate: c.date,
-		Currency: c.entry.Currency, IdempotencyKey: glKeyPrefix + c.journalID, SourceType: glSourceType}
+		Currency: c.entry.Currency, IdempotencyKey: ledgerclient.MustPostingKey("inventory", "journal", c.journalID, "post"), SourceType: glSourceType}
 	for _, l := range c.entry.Lines {
 		if l.Debit.IsPositive() {
 			e.Lines = append(e.Lines, ledgerclient.Line{Account: l.Account, Amount: l.Debit})
@@ -178,7 +181,7 @@ func (s *Postgres) unbookedJournals(ctx context.Context, tenantID, legalEntityID
 func (s *Postgres) stage(ctx context.Context, tenantID, legalEntityID, ledgerID, journalID string) (status, entryID string, err error) {
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `insert into inventory_gl_posting (tenant_id, journal_id, legal_entity_id, gl_ledger_id, idempotency_key)
-			values ($1, $2, $3, $4, $5) on conflict do nothing`, tenantID, journalID, legalEntityID, ledgerID, glKeyPrefix+journalID); err != nil {
+			values ($1, $2, $3, $4, $5) on conflict do nothing`, tenantID, journalID, legalEntityID, ledgerID, glKey(journalID)); err != nil {
 			return err
 		}
 		return tx.QueryRow(ctx, `select status, coalesce(journal_entry_id, '') from inventory_gl_posting where tenant_id = $1 and journal_id = $2`,

@@ -457,7 +457,7 @@ func TestPaymentRun_EndToEndWithRealXSDAndLedgerReplay(t *testing.T) {
 			t.Errorf("journal lacks %q: %v", want, lines)
 		}
 	}
-	if f.ledger.keys[0] != "payables:payment-run:"+runID || f.ledger.bodies[0]["postingDate"] != "2026-01-10" || f.ledger.bodies[0]["ledgerId"] != runLedgerID {
+	if f.ledger.keys[0] != "post:payables:paymentrun:"+runID+":post" || f.ledger.bodies[0]["postingDate"] != "2026-01-10" || f.ledger.bodies[0]["ledgerId"] != runLedgerID {
 		t.Errorf("journal key/date/ledger = %s / %v / %v", f.ledger.keys[0], f.ledger.bodies[0]["postingDate"], f.ledger.bodies[0]["ledgerId"])
 	}
 

@@ -74,7 +74,7 @@ func TestCashDeskEntry_PostsToTheLedgerWithTheDeskCashAccount(t *testing.T) {
 	if pay[0].Account != deskCashLedger || !pay[0].Credit || pay[1].Account != "6400" || pay[1].Credit || !pay[0].Amount.Equal(decimal.RequireFromString("12.50")) {
 		t.Errorf("payment lines = %+v; want credit cash 1000, debit 6400", pay)
 	}
-	if got[0].SourceType != "cash_desk_entry" || !strings.HasPrefix(got[0].IdempotencyKey, "treasury-desk-") || got[0].DocumentID != d.f.desk.ID {
+	if got[0].SourceType != "cash_desk_entry" || !strings.HasPrefix(got[0].IdempotencyKey, "post:treasury:deskentry:") || got[0].DocumentID != d.f.desk.ID {
 		t.Errorf("entry = %+v", got[0])
 	}
 }
@@ -178,7 +178,7 @@ func TestCashDeskClose_DenominationsMustAddUpAndADifferencePostsToTheDifferenceA
 		t.Fatalf("close = %d %s (counted %s); want the denomination total 40.50 and the difference posted", code, body, d.f.closed)
 	}
 	got := d.ledger.Entries()
-	if len(got) != 1 || got[0].SourceType != "cash_desk_difference" || got[0].IdempotencyKey != "treasury-deskdiff-"+d.f.desk.ID+"-2026-11-02" {
+	if len(got) != 1 || got[0].SourceType != "cash_desk_difference" || got[0].IdempotencyKey != "post:treasury:deskdifference:"+d.f.desk.ID+":post:2026-11-02" {
 		t.Fatalf("ledger entries = %+v; want the one difference entry", got)
 	}
 	if l := got[0].Lines; l[0].Account != deskCashLedger || !l[0].Credit || l[1].Account != "6990" || l[1].Credit || !l[0].Amount.Equal(decimal.RequireFromString("0.50")) {

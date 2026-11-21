@@ -264,7 +264,7 @@ func allocationEntry(run domain.AllocationRun) ledgerclient.Entry {
 	doc := uuid.NewSHA1(uuid.MustParse(run.ID), []byte("allocation")).String()
 	return ledgerclient.Entry{
 		LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, DocumentID: doc, PostingDate: run.PostingDate, Currency: run.Currency,
-		IdempotencyKey: doc, SourceType: "allocation", PostClosed: false, Lines: lines,
+		IdempotencyKey: ledgerclient.MustPostingKey("close", "allocation", run.ID, "post"), SourceType: "allocation", PostClosed: false, Lines: lines,
 	}
 }
 
@@ -324,7 +324,7 @@ func (a *API) reverseAllocation(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, run)
 		return
 	}
-	key := uuid.NewSHA1(uuid.MustParse(run.ID), []byte("allocation-reverse")).String()
+	key := ledgerclient.MustPostingKey("close", "allocation", run.ID, "reverse")
 	id, err := a.yearLedger.Reverse(r.Context(), ledgerclient.Reversal{
 		LegalEntityID: run.LegalEntityID, EntryID: run.EntryID, PostingDate: run.PostingDate, IdempotencyKey: key,
 		Description: "Allocation reversal " + run.ID,
@@ -564,7 +564,7 @@ func (a *API) advanceAccrual(ctx context.Context, run domain.AccrualRun, today t
 			doc := uuid.NewSHA1(uuid.MustParse(run.ID), []byte("accrual-"+date)).String()
 			id, err := a.yearLedger.Post(ctx, ledgerclient.Entry{
 				LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, PostingDate: date, Currency: run.Currency,
-				DocumentID: doc, IdempotencyKey: doc, SourceType: "accrual", PostClosed: false, Lines: []ledgerclient.Line{
+				DocumentID: doc, IdempotencyKey: ledgerclient.MustPostingKey("close", "accrual", run.ID, "post", date), SourceType: "accrual", PostClosed: false, Lines: []ledgerclient.Line{
 					{Account: run.DebitAccount, Amount: o.Amount},
 					{Account: run.CreditAccount, Credit: true, Amount: o.Amount},
 				},
@@ -585,7 +585,7 @@ func (a *API) advanceAccrual(ctx context.Context, run domain.AccrualRun, today t
 		}
 		rev, err := a.yearLedger.Reverse(ctx, ledgerclient.Reversal{
 			LegalEntityID: run.LegalEntityID, EntryID: run.EntryIDs[occKey], PostingDate: reverseOn,
-			IdempotencyKey: uuid.NewSHA1(uuid.MustParse(run.ID), []byte("accrual-rev-"+date)).String(),
+			IdempotencyKey: ledgerclient.MustPostingKey("close", "accrual", run.ID, "reverse", date),
 			Description:    "Accrual reversal", PostClosed: false,
 		})
 		if err != nil {
@@ -926,7 +926,7 @@ func regroupEntry(run domain.RegroupingRun, currency string) ledgerclient.Entry 
 	doc := uuid.NewSHA1(uuid.MustParse(run.ID), []byte("regrouping")).String()
 	return ledgerclient.Entry{
 		LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, DocumentID: doc, PostingDate: run.KeyDate, Currency: currency,
-		IdempotencyKey: doc, SourceType: "regrouping", PostClosed: false, Lines: lines,
+		IdempotencyKey: ledgerclient.MustPostingKey("close", "regrouping", run.ID, "post"), SourceType: "regrouping", PostClosed: false, Lines: lines,
 	}
 }
 
@@ -986,7 +986,7 @@ func (a *API) reverseRegroup(w http.ResponseWriter, r *http.Request) {
 	if len(run.Proposal) > 0 && run.Proposal[0].ReverseOn != "" {
 		revDate = run.Proposal[0].ReverseOn
 	}
-	key := uuid.NewSHA1(uuid.MustParse(run.ID), []byte("regrouping-reverse")).String()
+	key := ledgerclient.MustPostingKey("close", "regrouping", run.ID, "reverse")
 	id, err := a.yearLedger.Reverse(r.Context(), ledgerclient.Reversal{
 		LegalEntityID: run.LegalEntityID, EntryID: run.EntryID, PostingDate: revDate, IdempotencyKey: key, Description: "Regrouping reversal",
 	})

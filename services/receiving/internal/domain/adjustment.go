@@ -2,19 +2,17 @@ package domain
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/depot/platform/ledgerclient"
 	"github.com/BenjaminSRussell/depot/platform/money"
 )
 
 const (
 	AdjustmentCredit = "CREDIT"
 	AdjustmentDebit  = "DEBIT"
-
-	adjustmentKeyFormat = "post:receiving:invoiceadjustment:%s"
 )
 
 type InvoiceLineState struct {
@@ -65,7 +63,7 @@ func PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, periods Pe
 		sign = sign.Neg()
 	}
 	entry := JournalEntry{
-		IdempotencyKey: fmt.Sprintf(adjustmentKeyFormat, in.ID),
+		IdempotencyKey: ledgerclient.MustPostingKey("receiving", "invoiceadjustment", in.ID, "adjustment"),
 		LegalEntityID:  in.LegalEntityID,
 		LedgerID:       in.LedgerID,
 		PostingDate:    in.PostingDate,

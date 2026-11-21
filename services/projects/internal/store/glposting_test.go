@@ -342,14 +342,41 @@ func TestGL_RetryResendsStoredBookingsAfterLostAnswerAndProfileChange(t *testing
 		byKey[e.IdempotencyKey] = e.ID
 	}
 	for _, b := range res.Booked {
-		if byKey["projects:txn:"+txn.ID+":1"] != b.EntryID && byKey["projects:wip:ES-RETRY:2026-10"] != b.EntryID {
+		if byKey["post:projects:transaction:"+txn.ID+":post:1"] != b.EntryID && byKey["post:projects:wip:ES-RETRY:post:2026-10"] != b.EntryID {
 			t.Fatalf("booked entry %s is not one of the ledger's: %+v", b.EntryID, byKey)
 		}
 	}
 	g.wantReconciled("retry")
 	got, err := g.s.ListTransactions(g.ctx, "ES-RETRY", "", 10)
-	if err != nil || len(got.Items) != 1 || got.Items[0].JournalID == nil || *got.Items[0].JournalID != byKey["projects:txn:"+txn.ID+":1"] {
+	if err != nil || len(got.Items) != 1 || got.Items[0].JournalID == nil || *got.Items[0].JournalID != byKey["post:projects:transaction:"+txn.ID+":post:1"] {
 		t.Fatalf("the transaction must carry the ledger entry: %+v %v", got, err)
+	}
+}
+
+func TestGL_PendingBookingStoredUnderTheLegacyKeyIsResentNotRebooked(t *testing.T) {
+	g := newGLRig(t, "ES-LEGACY", "100000.00")
+	g.profile(accOffset)
+	txn := g.hours("ES-LEGACY", "2026-10-15", "10")
+
+	g.led.LoseAnswers(errors.New("connection reset"))
+	g.post("", "")
+	legacy := "projects:txn:" + txn.ID + ":1"
+	err := dbx.WithTenantTx(g.ctx, g.s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(g.ctx, `update project_gl_booking set idempotency_key = $1 where txn_id = $2::uuid`, legacy, txn.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.led.LoseAnswers(nil)
+
+	res := g.post("", "")
+	var rows int
+	err = dbx.WithTenantTx(g.ctx, g.s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(g.ctx, `select count(*) from project_gl_booking where txn_id = $1::uuid`, txn.ID).Scan(&rows)
+	})
+	if err != nil || len(res.Booked) != 1 || rows != 1 {
+		t.Fatalf("the booking stored under the old key must be resent, not duplicated: %+v rows=%d %v", res, rows, err)
 	}
 }
 

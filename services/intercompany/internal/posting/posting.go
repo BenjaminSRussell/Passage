@@ -97,7 +97,7 @@ func (p *Poster) reverseSide(ctx context.Context, rec domain.JournalRecord, e do
 	date := wanted
 	for shifts := 0; ; shifts++ {
 		id, err = p.ledger.Reverse(ctx, ledgerclient.Reversal{LegalEntityID: e.Target.LegalEntityID, EntryID: e.LedgerEntryID, PostingDate: date.Format(dateLayout),
-			Description: "Intercompany compensation " + rec.PairID, IdempotencyKey: "ic-rev:" + rec.PairID + ":" + e.Entity})
+			Description: "Intercompany compensation " + rec.PairID, IdempotencyKey: ledgerclient.MustPostingKey("intercompany", "pair", rec.PairID, "reverse", e.Entity)})
 		if err == nil || !periodClosed(err) || shifts >= MaxShifts {
 			return id, date, err
 		}
@@ -210,7 +210,7 @@ func ledgerEntry(rec domain.JournalRecord, e domain.PostedEntry, date, original 
 		lines = append(lines, ledgerclient.Line{Account: l.Account, Credit: l.Side == domain.Credit, Amount: l.Amount.Value, Text: ShiftNote(rec.PairID, original, date), TradingPartnerID: partner})
 	}
 	return ledgerclient.Entry{LegalEntityID: e.Target.LegalEntityID, LedgerID: e.Target.LedgerID, DocumentID: rec.PairID, PostingDate: date.Format(dateLayout),
-		Currency: e.Currency, IdempotencyKey: "ic:" + rec.PairID + ":" + e.Entity, SourceType: SourceType, Lines: lines}
+		Currency: e.Currency, IdempotencyKey: ledgerclient.MustPostingKey("intercompany", "pair", rec.PairID, "post", e.Entity), SourceType: SourceType, Lines: lines}
 }
 
 // refused handles a side the ledger did not take. A refusal that a retry

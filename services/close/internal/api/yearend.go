@@ -266,7 +266,7 @@ func (a *API) reversePrior(ctx context.Context, run domain.YearEndRun) (domain.Y
 	}
 	id, err := a.yearLedger.Reverse(ctx, ledgerclient.Reversal{
 		LegalEntityID: run.LegalEntityID, EntryID: entry, PostingDate: prior.ClosingDate, PostClosed: true,
-		IdempotencyKey: documentID(run.ID, domain.JournalReverseClosing),
+		IdempotencyKey: ledgerclient.MustPostingKey("close", "yearend", run.ID, domain.JournalReverseClosing),
 		Description:    "Year-end re-run " + run.FiscalYear + ": reversal of run " + prior.ID,
 	})
 	if err != nil {
@@ -347,7 +347,7 @@ func yearEndEntry(run domain.YearEndRun, entries []domain.Entry) ledgerclient.En
 	document := documentID(run.ID, domain.JournalClosing)
 	return ledgerclient.Entry{
 		LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, DocumentID: document, PostingDate: run.ClosingDate, Currency: run.Currency,
-		IdempotencyKey: document, SourceType: "year_end_" + domain.JournalClosing, PostClosed: true, Lines: lines,
+		IdempotencyKey: ledgerclient.MustPostingKey("close", "yearend", run.ID, domain.JournalClosing), SourceType: "year_end_" + domain.JournalClosing, PostClosed: true, Lines: lines,
 	}
 }
 

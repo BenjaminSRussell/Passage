@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,7 +52,7 @@ func (l *recordingLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Amount      struct{ Value string }
 		} `json:"lines"`
 	}
-	if r.URL.Path != domain.LedgerPostPath || r.Header.Get("Idempotency-Key") == "" || json.NewDecoder(r.Body).Decode(&body) != nil {
+	if r.URL.Path != "/v1/ledger/journal-entries" || r.Header.Get("Idempotency-Key") == "" || json.NewDecoder(r.Body).Decode(&body) != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -100,14 +101,14 @@ func closeService(t *testing.T, status int, body string) *periods.Client {
 }
 
 func tenantCtx() context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: testEntityID})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: testEntityID, UserID: "u-1"})
 }
 
 func TestPostInvoice_GrirNetsToZeroThroughRealLedgerAdapter(t *testing.T) {
 	recorder := &recordingLedger{}
 	ledgerSrv := httptest.NewServer(recorder)
 	t.Cleanup(ledgerSrv.Close)
-	ledgerClient := ledger.New(ledgerSrv.URL, nil)
+	ledgerClient := ledger.New(ledgerSrv.URL, nil).WithSigner(postingSigner(t))
 	st := memstore.New()
 	a := api.New(st, api.Ports{
 		Periods: closeService(t, http.StatusOK, `{"allowed":true,"module":"ap","status":"open"}`),
@@ -177,7 +178,7 @@ func TestPostInvoice_ClosedPeriodRejectedByRealPeriodsAdapter(t *testing.T) {
 			recorder := &recordingLedger{}
 			ledgerSrv := httptest.NewServer(recorder)
 			t.Cleanup(ledgerSrv.Close)
-			a := api.New(memstore.New(), api.Ports{Periods: closeService(t, tc.status, tc.body), Ledger: ledger.New(ledgerSrv.URL, nil)})
+			a := api.New(memstore.New(), api.Ports{Periods: closeService(t, tc.status, tc.body), Ledger: ledger.New(ledgerSrv.URL, nil).WithSigner(postingSigner(t))})
 			item := domain.GrirItem{ReceivedQty: decimal.NewFromInt(10), ReceivedAmount: money.Amount{Value: decimal.NewFromInt(50), Currency: "USD"}}
 			in := domain.VendorInvoice{ID: "i-1", LegalEntityID: testEntityID, LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: &item, Qty: decimal.NewFromInt(10), UnitPrice: decimal.NewFromInt(5)}}}
 
@@ -200,7 +201,7 @@ func TestPostInvoice_LedgerPeriodClosedMapsToProblemCode(t *testing.T) {
 		_, _ = w.Write([]byte(`{"code":"period_closed"}`))
 	}))
 	t.Cleanup(ledgerSrv.Close)
-	a := api.New(memstore.New(), api.Ports{Periods: closeService(t, http.StatusOK, `{"allowed":true,"module":"ap","status":"open"}`), Ledger: ledger.New(ledgerSrv.URL, nil)})
+	a := api.New(memstore.New(), api.Ports{Periods: closeService(t, http.StatusOK, `{"allowed":true,"module":"ap","status":"open"}`), Ledger: ledger.New(ledgerSrv.URL, nil).WithSigner(postingSigner(t))})
 	item := domain.GrirItem{ReceivedQty: decimal.NewFromInt(1), ReceivedAmount: money.Amount{Value: decimal.NewFromInt(5), Currency: "USD"}}
 	in := domain.VendorInvoice{ID: "i-2", LegalEntityID: testEntityID, LedgerID: ledgerUUID, FiscalPeriodID: fiscalPeriodID, PostingDate: postingDay, Currency: "USD", Lines: []domain.PostLine{{Item: &item, Qty: decimal.NewFromInt(1), UnitPrice: decimal.NewFromInt(5)}}}
 
@@ -239,3 +240,13 @@ func TestNew_PanicsWithoutPorts(t *testing.T) {
 }
 
 const testEntityID = "00000000-0000-0000-0000-0000000000e1"
+
+func postingSigner(t *testing.T) *tenant.ServiceSigner {
+	t.Helper()
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, err := tenant.NewServiceSigner("receiving", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signer
+}

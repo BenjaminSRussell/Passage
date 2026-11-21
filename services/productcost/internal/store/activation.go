@@ -521,10 +521,10 @@ func postPending(ctx context.Context, ledger ledgerclient.Ledger, prepared prepa
 	a := prepared.pending.Activation
 	if a.ReversesActivationID != nil {
 		return ledger.Reverse(ctx, ledgerclient.Reversal{LegalEntityID: a.LegalEntityID, EntryID: prepared.pending.ReversesEntryID, PostingDate: a.PostingDate,
-			Description: "Reversal of standard cost activation " + *a.ReversesActivationID, IdempotencyKey: "productcost.activation.reversal:" + a.VersionID + ":" + *a.ReversesActivationID})
+			Description: "Reversal of standard cost activation " + *a.ReversesActivationID, IdempotencyKey: ledgerclient.MustPostingKey("productcost", "activation", *a.ReversesActivationID, "reversal", a.VersionID)})
 	}
 	e := ledgerclient.Entry{LegalEntityID: a.LegalEntityID, LedgerID: a.LedgerID, DocumentID: a.ID, PostingDate: a.PostingDate, Currency: a.Currency,
-		IdempotencyKey: "productcost.activation:" + a.ID, SourceType: activationSourceType}
+		IdempotencyKey: ledgerclient.MustPostingKey("productcost", "activation", a.ID, "post"), SourceType: activationSourceType}
 	for _, l := range a.JournalLines {
 		e.Lines = append(e.Lines, ledgerclient.Line{Account: l.Account, Credit: l.Credit, Amount: l.Amount, Text: "Standard cost revaluation " + prepared.cur.Code})
 	}

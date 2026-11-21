@@ -21,6 +21,7 @@ import (
 	"github.com/BenjaminSRussell/depot/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/depot/platform/httpx"
 	"github.com/BenjaminSRussell/depot/platform/ids"
+	"github.com/BenjaminSRussell/depot/platform/ledgerclient"
 	"github.com/BenjaminSRussell/depot/platform/tenant"
 	"github.com/BenjaminSRussell/depot/services/payables/internal/domain"
 	"github.com/BenjaminSRussell/depot/services/payables/internal/ledger"
@@ -36,7 +37,6 @@ const (
 	maxAccountLen  = 20
 	maxReasonLen   = 500
 	runSourceType  = "payment_run"
-	runKeyPrefix   = "payables:payment-run:"
 )
 
 type RunStore interface {
@@ -504,7 +504,7 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 	}
 	entry := ledger.Entry{
 		LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, DocumentID: run.ID, PostingDate: proposal.RunDate, Currency: proposal.LegalEntityCurrency,
-		IdempotencyKey: runKeyPrefix + run.ID, SourceType: runSourceType,
+		IdempotencyKey: ledgerclient.MustPostingKey("payables", "paymentrun", run.ID, "post"), SourceType: runSourceType,
 		Lines: domain.RunJournal(proposal.LegalEntityCurrency, proposal.Groups, run.ControlAccount, run.BankAccount, discountAccount, withholdingAccount, dims),
 	}
 	if dims.Attribute != "" && len(dims.Codes) > 0 {
