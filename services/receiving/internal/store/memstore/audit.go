@@ -48,6 +48,8 @@ func (s *Store) release(ctx context.Context, id, legalEntityID, by, reason strin
 			if err := checkAssignee(t, id, by); err != nil {
 				return err
 			}
+		} else if e, held := t.exceptions[id]; held && e.Status == domain.ExceptionOpen {
+			return &domain.Error{Code: domain.CodeExceptionNotAssignee, Detail: "invoice is held by a matching-policy exception; the policy owner must approve it with a reason"}
 		}
 		if err := store.CheckRelease(inv, legalEntityID, by); err != nil {
 			return err

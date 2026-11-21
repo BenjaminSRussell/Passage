@@ -112,6 +112,18 @@ func TestMatchingPolicy_PosterWhoOwnsThePolicyCannotApproveTheirOwnInvoice(t *te
 	}
 }
 
+func TestMatchingPolicy_ReleaseAuditBlockCannotBypassTheOwnerApproval(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	rg.putMatchingPolicy(t, "", "owner-1", strictPolicy, http.StatusOK)
+	r := rg.posted(t, "PS-1", 10, 4)
+	held := rg.overPriceInvoice(t, "INV-1", r.ID).invoice(t, http.StatusCreated)
+	entries := len(rg.ledger.Entries)
+
+	if code, body := rg.release(held.ID, "bob"); code != http.StatusForbidden || !strings.Contains(body, "AP-MPX-002") || len(rg.ledger.Entries) != entries {
+		t.Fatalf("release bypass: %d %s", code, body)
+	}
+}
+
 func TestMatchingPolicy_NoPolicyOrWithinToleranceLeavesPostingUnchanged(t *testing.T) {
 	for name, scope := range map[string]string{"no stored policy": "", "a stored policy the price is within": loosePolicy} {
 		t.Run(name, func(t *testing.T) {

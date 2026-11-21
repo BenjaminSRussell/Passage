@@ -115,6 +115,8 @@ func (s *Postgres) release(ctx context.Context, id, legalEntityID, by, reason st
 			if err := checkAssignee(ctx, tx, tenantID, id, by); err != nil {
 				return err
 			}
+		} else if err := rejectIfExceptionOpen(ctx, tx, tenantID, id); err != nil {
+			return err
 		}
 		if err := CheckRelease(inv, legalEntityID, by); err != nil {
 			return err

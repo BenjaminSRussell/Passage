@@ -10,6 +10,8 @@ import (
 	"github.com/BenjaminSRussell/depot/services/receiving/internal/domain"
 )
 
+const errExceptionHeld = "invoice is held by a matching-policy exception; the policy owner must approve it with a reason"
+
 func exceptionNotOpen(invoiceID, status string) *domain.Error {
 	return &domain.Error{Code: domain.CodeExceptionNotOpen, Detail: "the exception of invoice " + invoiceID + " is " + status + ", not OPEN"}
 }
@@ -113,4 +115,15 @@ func closeException(ctx context.Context, tx pgx.Tx, tenantID, invoiceID, status,
 	_, err := tx.Exec(ctx, `UPDATE receiving_invoice_exception SET status = $3, decided_by = $4, decided_at = now(), decision_reason = $5
 		WHERE tenant_id = $1 AND invoice_id = $2 AND status = 'OPEN'`, tenantID, invoiceID, status, by, reason)
 	return err
+}
+
+func rejectIfExceptionOpen(ctx context.Context, tx pgx.Tx, tenantID, invoiceID string) error {
+	var open bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM receiving_invoice_exception WHERE tenant_id = $1 AND invoice_id = $2 AND status = 'OPEN')`, tenantID, invoiceID).Scan(&open); err != nil {
+		return err
+	}
+	if open {
+		return &domain.Error{Code: domain.CodeExceptionNotAssignee, Detail: errExceptionHeld}
+	}
+	return nil
 }
