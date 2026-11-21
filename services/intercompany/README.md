@@ -24,7 +24,7 @@ Nothing is persisted and no event is published yet.
 | Counters on `/metrics` (admin port) | `internal/api` | built, tests |
 | Web workspace: `/intercompany`, `/intercompany/journal`, `/intercompany/reconciliation` | `apps/web/src/modules/intercompany` | built, vitest |
 
-Browser calls go to `/api/v1/interco/...`; the web BFF rewrites them to the
+Browser calls go to `/api/v1/interco/...`; the API gateway rewrites them to the
 `/v1/interco/...` paths above and sets `X-Depot-Tenant` and
 `X-Depot-Duties`.
 

@@ -23,7 +23,7 @@ Nothing is persisted, no run is versioned and no event is published yet.
 | Counters on `/metrics` (admin port) | `internal/api` | built, tests |
 | Web workspace: `/consolidation`, `/consolidation/eliminations`, `/consolidation/translation` | `apps/web/src/modules/consolidation` | built, vitest |
 
-Browser calls go to `/api/v1/consol/...`; the web BFF rewrites them to the
+Browser calls go to `/api/v1/consol/...`; the API gateway rewrites them to the
 `/v1/consol/...` paths above and sets `X-Depot-Tenant` and
 `X-Depot-Duties`.
 

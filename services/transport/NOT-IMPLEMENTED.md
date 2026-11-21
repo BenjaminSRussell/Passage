@@ -128,7 +128,7 @@ owner's work, or a change outside this wave's paths).
 | OPA duty decisions (`data.depot.authz.decision`) | handoff (platform kernel, edge identity) | Slice 1 uses the kernel's local duty check through `authz.RequireDuty` |
 | Rate-card overlap enforced at database level | later slice of DPT-34 | Enforced in the store (`Overlaps`) only |
 | Events `dev.depot.tms.shipment.rated.v1`, and load (other than `load.released`), DG or gate check-out events | later slice of DPT-34 | Published: `load.released` (#426), `freightbill.matched`, `freightbill.approved` (slice 3), `tender.accepted/declined/expired`, `tracking.event`, `landedcost.posted`, `gate.checkedin` and `goodsintransit.shipped` (slice 4; the latter is not in the PRD's event table and is added for wave 20). Load builds, DG checks and check-outs publish nothing yet. Screening holds, their release and route plans publish nothing: the PRD's event table has no event for them |
-| BFF route registration for `/api/v1/transport` | handoff (web-bff owner) | The service follows the `/v1/<service>` convention the BFF rewrites; registering the upstream is outside this wave's paths |
+| Gateway route registration for `/api/v1/transport` | handoff (gateway owner) | The service follows the `/v1/<service>` convention the gateway rewrites; registering the upstream is outside this wave's paths |
 | Error codes TMS-0103, 0107, 0125, 0132, 0135 | later slice of DPT-34 | Raised only by features not built in slices 1 to 5. TMS-0128 is raised by the check-in rule but cannot be reached until sites can refuse walk-ins (D7) |
 
 ## Legal-entity scope follow-ups (#241)

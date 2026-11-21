@@ -9,7 +9,7 @@
 | Deliverable 4: blocking gate for unsigned images and its negative test (AC4) | built (Kyverno), live proof open | `deploy/policies/admission/verify-signed-images.yaml` is a Kyverno ClusterPolicy in Enforce mode; the negative test `deploy/scripts/negative-unsigned-image.sh` needs a live cluster (#213); CI builds the SBOM, signs and attests every pushed image |
 | sigstore policy-controller, `ClusterImagePolicy` | not used | Kyverno `verify-signed-images` is the admission gate instead (FR-1.7) |
 | HIGH-severity-older-than-14-days gate and `.vuln-exceptions.yaml` (FR-1.6) | not built | CI fails on CRITICAL only; the exception file format is slice 2 |
-| gitleaks gate (FR-1.11) | not built | slice 2 |
+| gitleaks gate: Secrets and config (FR-1.11) | not built | slice 2 |
 | Vault and External Secrets Operator | not built | dev and local use a Secret created by `deploy-local`; no secret value is in Git |
 | CloudNativePG | not built | dev uses a single in-cluster Postgres; the service connects as the non-superuser `depot_app` role (no BYPASSRLS) created by an init script, and List also filters by tenant_id |
 | Root `make deploy-local` | handoff | root `Makefile` is outside wave 1 ownership; add `deploy-local: ; $(MAKE) -C deploy deploy-local` there |

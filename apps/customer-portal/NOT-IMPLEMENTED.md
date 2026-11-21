@@ -5,7 +5,7 @@
 | Read-only portal: orders, invoices and credit notes, open items, payments, statement, returns | built | see README; services: sales, billing, receivables |
 | Vite/React app, tests, axe checks on every page | built | English only |
 | Placing orders from the portal (FR-30.14) | built | order form: products the customer has bought are reordered at the price, unit and warehouse of its last order; products its listings allow but it has not bought are offered in their own group, the customer names the unit and sales prices the line through pricing at the agreed price; sales confirms the order through the credit check |
-| Requesting a return (FR-30.14) | built | pick one of the customer's invoices, the lines and a reason; staff authorize, receive and inspect it as any return order |
+| Requesting a return: Customer portal (FR-30.14) | built | pick one of the customer's invoices, the lines and a reason; staff authorize, receive and inspect it as any return order |
 | Product names on order and return lines | built | from the product service through sales; images are not built |
 | Customer names in the company selector | built | identity's customer-facing legal-entity name; falls back to a numbered name |
 | Contacts of bill-to or ship-to accounts of the same customer group | built | an "Acting for" selector when party lists more than one account for the contact |

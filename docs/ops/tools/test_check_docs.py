@@ -191,6 +191,18 @@ class TestCheckFrTitles(unittest.TestCase):
             repo = self.repo(tmp, "| Customer portal order requests (FR-30.14) | built | x |\n")
             self.assertEqual(cd.check_fr_titles(repo), [])
 
+    def test_table_row_naming_no_sibling_title_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, "| Shipment tracking (FR-30.26) | built | x |\n")
+            self.assertEqual(len(cd.check_fr_titles(repo)), 1)
+
+    def test_every_id_in_a_row_is_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, "| Customer portal order entry (FR-30.14 and FR-30.26) | built | x |\n")
+            errors = cd.check_fr_titles(repo)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("FR-30.26", errors[0])
+
     def test_empty_prd_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             errors = cd.check_fr_titles(self.repo(tmp, "- **FR-30.14 Customer portal.**\n", prd="no titles here\n"))
