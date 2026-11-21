@@ -353,6 +353,33 @@ func TestGL_RetryResendsStoredBookingsAfterLostAnswerAndProfileChange(t *testing
 	}
 }
 
+func TestGL_PendingBookingStoredUnderTheLegacyKeyIsResentNotRebooked(t *testing.T) {
+	g := newGLRig(t, "ES-LEGACY", "100000.00")
+	g.profile(accOffset)
+	txn := g.hours("ES-LEGACY", "2026-10-15", "10")
+
+	g.led.LoseAnswers(errors.New("connection reset"))
+	g.post("", "")
+	legacy := "projects:txn:" + txn.ID + ":1"
+	err := dbx.WithTenantTx(g.ctx, g.s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(g.ctx, `update project_gl_booking set idempotency_key = $1 where txn_id = $2::uuid`, legacy, txn.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.led.LoseAnswers(nil)
+
+	res := g.post("", "")
+	var rows int
+	err = dbx.WithTenantTx(g.ctx, g.s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(g.ctx, `select count(*) from project_gl_booking where txn_id = $1::uuid`, txn.ID).Scan(&rows)
+	})
+	if err != nil || len(res.Booked) != 1 || rows != 1 {
+		t.Fatalf("the booking stored under the old key must be resent, not duplicated: %+v rows=%d %v", res, rows, err)
+	}
+}
+
 func TestGL_RejectedBookingIsRebuiltFromTheCurrentProfile(t *testing.T) {
 	g := newGLRig(t, "ES-REJ", "100000.00")
 	g.profile("2900")

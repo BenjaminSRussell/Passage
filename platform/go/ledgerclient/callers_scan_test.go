@@ -19,6 +19,22 @@ const (
 
 var scannedRoots = []string{"../../../services", "../../../tools"}
 
+var forwardingAdapters = []string{
+	"services/receiving/internal/ledger/ledger.go",
+	"services/payables/internal/ledger/ledger.go",
+	"services/tax/internal/ledger/poster.go",
+}
+
+func isForwardingAdapter(path string) bool {
+	slashed := filepath.ToSlash(path)
+	for _, a := range forwardingAdapters {
+		if strings.HasSuffix(slashed, a) {
+			return true
+		}
+	}
+	return false
+}
+
 type callerScan struct {
 	violations   []string
 	builderUsers map[string]bool
@@ -54,6 +70,17 @@ func isLedgerclientSelector(e ast.Expr, names ...string) bool {
 	return false
 }
 
+func isPostingType(e ast.Expr) bool {
+	name := ""
+	switch t := e.(type) {
+	case *ast.SelectorExpr:
+		name = t.Sel.Name
+	case *ast.Ident:
+		name = t.Name
+	}
+	return name == "Entry" || name == "Reversal" || name == "JournalEntry"
+}
+
 func (s *callerScan) inspectFile(path string) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
@@ -74,10 +101,10 @@ func (s *callerScan) inspectFile(path string) {
 			}
 		case *ast.CallExpr:
 			if isLedgerclientSelector(x.Fun, "PostingKey", "MustPostingKey") {
-				s.builderUsers[owner] = true
+				s.builderUsers[path] = true
 			}
 		case *ast.CompositeLit:
-			if !isLedgerclientSelector(x.Type, "Entry", "Reversal") {
+			if !isPostingType(x.Type) {
 				return true
 			}
 			for _, el := range x.Elts {
@@ -95,7 +122,7 @@ func (s *callerScan) inspectFile(path string) {
 						s.violations = append(s.violations, where+": the key is built by a call other than ledgerclient.PostingKey")
 					}
 				case *ast.Ident, *ast.SelectorExpr:
-					s.looseKeys[owner] = append(s.looseKeys[owner], where)
+					s.looseKeys[path] = append(s.looseKeys[path], where)
 				default:
 					s.violations = append(s.violations, where+": the key is a literal or a concatenation, not ledgerclient.PostingKey")
 				}
@@ -134,8 +161,8 @@ func scanCallers(t *testing.T, roots []string) *callerScan {
 	if files == 0 {
 		t.Fatal("the scan found no Go files; the roots moved")
 	}
-	for owner, keys := range s.looseKeys {
-		if !s.builderUsers[owner] {
+	for file, keys := range s.looseKeys {
+		if !s.builderUsers[file] && !isForwardingAdapter(file) {
 			s.violations = append(s.violations, keys...)
 		}
 	}
@@ -174,10 +201,15 @@ var _ = ledgerclient.Entry{IdempotencyKey: key}
 import "github.com/BenjaminSRussell/depot/platform/ledgerclient"
 var _ = ledgerclient.Entry{IdempotencyKey: key}
 `)
+	write("zeta/z.go", `package z
+type JournalEntry struct{ IdempotencyKey string }
+var _ = JournalEntry{IdempotencyKey: fmt.Sprintf("z:%s", id)}
+var _ = domain.JournalEntry{IdempotencyKey: key}
+`)
 	write("epsilon/e.go", "package e\nfunc broken(")
 	got := scanCallers(t, []string{filepath.Join(dir, "services")})
 	joined := strings.Join(got.violations, "\n")
-	for _, want := range []string{"alpha/a.go:3", "alpha/a.go:4", "beta/b.go", "delta/d.go:3", "cannot parse"} {
+	for _, want := range []string{"alpha/a.go:3", "alpha/a.go:4", "beta/b.go", "delta/d.go:3", "zeta/z.go:3", "zeta/z.go:4", "cannot parse"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("violations do not name %s:\n%s", want, joined)
 		}
