@@ -486,6 +486,7 @@ const ledger: Record<string, ProblemCatalogEntry> = {
   LEDGER_IDEMPOTENCY_IN_PROGRESS: { message: "The same request is still being processed.", action: "Wait a moment, then reload the page." },
   LEDGER_NOT_FOUND: { message: "We couldn't find that ledger, or you don't have access to it.", action: ASK_ADMIN },
   LEDGER_ENTRY_NOT_FOUND: { message: "We couldn't find that journal entry, or you don't have access to it.", action: "Go back to the list and open it again." },
+  LEDGER_POSTING_REQUEST_NOT_FOUND: { message: "No posting is recorded for that key, or you don't have access to it.", action: "Check the key and try again." },
   LEDGER_CODE_DUPLICATE: { message: "A ledger with this code already exists.", action: "Choose a different code." },
   LEDGER_BATCH_STATE: { message: "The batch is in a state that doesn't allow this action.", action: "Reload the page to see the batch's current state." },
   LEDGER_BATCH_APPROVAL_REQUIRED: { message: "This journal name now needs approval before posting.", action: "Submit the batch for approval." },

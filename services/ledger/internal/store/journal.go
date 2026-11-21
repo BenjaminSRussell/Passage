@@ -67,6 +67,9 @@ func (s *Postgres) PostEntry(ctx context.Context, in PostInput) (EntryResult, er
 		out, err = postEntryTx(ctx, tx, p.TenantID, in)
 		return err
 	})
+	if err != nil {
+		s.recordRejectedPosting(ctx, p.TenantID, in.LedgerID, in.Key, err)
+	}
 	return out, idempotencyRace(err)
 }
 
@@ -100,6 +103,9 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 		return out, err
 	}
 	out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID, Notices: notices}
+	if err := recordPostedRequest(ctx, tx, tenantID, ledger.LegalEntityID, ledger.ID, in.Key, entry.ID, entry.Voucher); err != nil {
+		return out, err
+	}
 	return out, storeIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
 }
 
@@ -345,6 +351,9 @@ func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseI
 		return out, err
 	}
 	out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID}
+	if err := recordPostedRequest(ctx, tx, tenantID, ledger.LegalEntityID, ledger.ID, in.Key, entry.ID, entry.Voucher); err != nil {
+		return out, err
+	}
 	return out, storeIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
 }
 

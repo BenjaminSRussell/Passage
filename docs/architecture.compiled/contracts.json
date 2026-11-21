@@ -2,7 +2,7 @@
   "version": 3,
   "compiler": "scripts/compile_architecture.py",
   "note": "Generated from the OpenAPI and AsyncAPI specs and scripts/architecture_patterns.json. Do not edit; run python3 scripts/compile_architecture.py --write.",
-  "summary": {"openapiDocuments": 65, "paths": 2662, "operations": 3291, "asyncapiDocuments": 61, "topics": 393, "topicsPublished": 391, "topicsSubscribed": 23, "patterns": 59},
+  "summary": {"openapiDocuments": 65, "paths": 2663, "operations": 3292, "asyncapiDocuments": 61, "topics": 393, "topicsPublished": 391, "topicsSubscribed": 23, "patterns": 59},
   "patterns": [
     {
       "id": "event-envelope",
@@ -2278,6 +2278,7 @@
         {"method": "GET", "path": "/v1/ledger/ledgers/{ledger}/validation-rules/{id}", "operationId": "getValidationRule", "duty": "ledger.journal.read"},
         {"method": "PUT", "path": "/v1/ledger/ledgers/{ledger}/validation-rules/{id}", "operationId": "putValidationRule", "duty": "ledger.rules.write"},
         {"method": "GET", "path": "/v1/ledger/open-items", "operationId": "listOpenItems", "duty": "ledger.journal.read"},
+        {"method": "GET", "path": "/v1/ledger/posting-requests/{key}", "operationId": "getPostingRequest", "duty": "ledger.journal.read"},
         {"method": "GET", "path": "/v1/ledger/reason-codes", "operationId": "listReasonCodes", "duty": "ledger.journal.read"},
         {"method": "GET", "path": "/v1/ledger/reason-codes/{code}", "operationId": "getReasonCode", "duty": "ledger.journal.read"},
         {"method": "PUT", "path": "/v1/ledger/reason-codes/{code}", "operationId": "putReasonCode", "duty": "ledger.reason.write"},
