@@ -2,7 +2,7 @@
   "version": 3,
   "compiler": "scripts/compile_architecture.py",
   "note": "Generated from the OpenAPI and AsyncAPI specs and scripts/architecture_patterns.json. Do not edit; run python3 scripts/compile_architecture.py --write.",
-  "summary": {"openapiDocuments": 65, "paths": 2662, "operations": 3291, "asyncapiDocuments": 61, "topics": 393, "topicsPublished": 391, "topicsSubscribed": 23, "patterns": 59},
+  "summary": {"openapiDocuments": 65, "paths": 2665, "operations": 3295, "asyncapiDocuments": 61, "topics": 393, "topicsPublished": 391, "topicsSubscribed": 23, "patterns": 59},
   "patterns": [
     {
       "id": "event-envelope",
@@ -2653,6 +2653,8 @@
         {"method": "GET", "path": "/v1/party/parties/{id}", "operationId": "getParty", "duty": "party.read", "dutyAlternatives": ["party.import.read"]},
         {"method": "PATCH", "path": "/v1/party/parties/{id}", "operationId": "updateParty", "duty": "party.write", "dutyAlternatives": ["party.import.write"]},
         {"method": "POST", "path": "/v1/party/parties/{id}/customer", "operationId": "createCustomerRole", "duty": "party.write", "dutyAlternatives": ["party.import.write"]},
+        {"method": "GET", "path": "/v1/party/parties/{id}/electronic-addresses", "operationId": "listElectronicAddresses", "duty": "party.read"},
+        {"method": "POST", "path": "/v1/party/parties/{id}/electronic-addresses", "operationId": "addElectronicAddress", "duty": "party.write"},
         {"method": "POST", "path": "/v1/party/parties/{id}/vendor", "operationId": "createVendorRole", "duty": "party.write", "dutyAlternatives": ["party.import.write"]},
         {"method": "GET", "path": "/v1/party/parties/{id}/vendors", "operationId": "listPartyVendors", "duty": "party.read"},
         {"method": "POST", "path": "/v1/party/parties/{id}:merge", "operationId": "requestPartyMerge", "duty": "party.merge"},
@@ -2670,6 +2672,8 @@
         {"method": "POST", "path": "/v1/party/pending-changes/{id}:reject", "operationId": "rejectPendingChange", "duty": "party.approve"},
         {"method": "GET", "path": "/v1/party/posting-profiles", "operationId": "listPostingProfiles", "duty": "party.read"},
         {"method": "GET", "path": "/v1/party/posting-profiles/{id}", "operationId": "getPostingProfile", "duty": "party.read"},
+        {"method": "GET", "path": "/v1/party/steward-tasks", "operationId": "listStewardTasks", "duty": "party.read"},
+        {"method": "POST", "path": "/v1/party/steward-tasks/{id}:resolve", "operationId": "resolveStewardTask", "duty": "party.write"},
         {"method": "POST", "path": "/v1/party/tax-registrations:validate", "operationId": "validateTaxRegistration", "duty": "party.write"},
         {"method": "GET", "path": "/v1/party/vendor-audit", "operationId": "listSupplierAudit", "duty": "party.read"},
         {"method": "GET", "path": "/v1/party/vendor-documents", "operationId": "listVendorDocuments", "duty": "party.read"},
