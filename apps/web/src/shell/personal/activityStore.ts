@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { PinSchema, pinKey, type Pin, type PinTarget } from "../pins/pinStore";
 import { localPreferenceStorage, type PreferenceStorage } from "../preferenceStorage";
+import { recentKey } from "../recent";
 
 export const MAX_ACTIVITY = 50;
 
@@ -32,4 +33,10 @@ export function recordActivity(identity: string, target: PinTarget, storage: Pre
   const rows = [{ ...target, at: now().toISOString() }, ...readActivity(identity, storage).filter((row) => pinKey(row) !== pinKey(target))].slice(0, MAX_ACTIVITY);
   const valid = ActivityList.safeParse(rows);
   if (valid.success) storage.write(activityKey(identity), JSON.stringify(valid.data));
+}
+
+export function resetPersonalization(identity: string, storage: PreferenceStorage = localPreferenceStorage): void {
+  if (identity === "") return;
+  storage.remove(activityKey(identity));
+  storage.remove(recentKey(identity));
 }

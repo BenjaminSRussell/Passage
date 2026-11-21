@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useRef } from "react";
+import { lazy, Suspense, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { postRoute } from "../../modules/copilot/api/client";
 import { AskAnswer } from "../../modules/copilot/AskAnswer";
@@ -16,7 +16,7 @@ import { PinnedRegion, useLookedUpLabels } from "../pins/PinnedRegion";
 import { usePins } from "../pins/PinsProvider";
 import { pinKey } from "../pins/pinStore";
 import { pinHref, RECORD_LOOKUP } from "../pins/pinTargets";
-import { readActivity, type Activity } from "../personal/activityStore";
+import { readActivity, resetPersonalization, type Activity } from "../personal/activityStore";
 import { orderWorkspaces, recentRecords, suggestedPrompts } from "../personal/homeOrder";
 import { plannedRouteFor } from "../plannedRoutes";
 import homeStyles from "../home/home.module.css";
@@ -25,7 +25,7 @@ import { useRecentPages } from "../recent";
 import { RECORD_TYPE_LABEL } from "../search/records";
 import { isPathEnabled } from "../tenant/featureRules";
 import { useTenantSettings } from "../tenant/TenantSettings";
-import { Alert, Badge, Button, Card, CardGrid, EmptyState, Icon, PageHeader } from "../ui";
+import { Alert, Badge, Button, Card, CardGrid, ConfirmDialog, EmptyState, Icon, PageHeader } from "../ui";
 import { WorkspaceKpis } from "./WorkspaceKpis";
 import { ALL_FEATURES_PATH, HOME_WORKSPACE_LIMIT, TOP_TASK_COUNT } from "../workspaces/model";
 import { useWorkspaceNav } from "../workspaces/WorkspaceNav";
@@ -56,9 +56,9 @@ function SetupBanner() {
   );
 }
 
-function Recent({ activity }: { activity: readonly Activity[] }) {
-  // TODO DEPOT-288: Reset personalization control (AC5, follow-up slice)
+function Recent({ activity, onReset }: { activity: readonly Activity[]; onReset(): void }) {
   const { pages } = useRecentPages();
+  const [confirming, setConfirming] = useState(false);
   const { canOpen } = usePins();
   const records = useMemo(() => recentRecords(activity, canOpen), [activity, canOpen]);
   const looked = useLookedUpLabels(records, canOpen);
@@ -67,7 +67,28 @@ function Recent({ activity }: { activity: readonly Activity[] }) {
     return typeof label === "string" ? [{ record, label }] : [];
   });
   return (
-    <Card title={copy.home.recentTitle} headingLevel={2}>
+    <Card
+      title={copy.home.recentTitle}
+      headingLevel={2}
+      actions={
+        <Button size="sm" onClick={() => setConfirming(true)}>
+          {copy.home.resetPersonalization}
+        </Button>
+      }
+    >
+      {confirming ? (
+        <ConfirmDialog
+          title={copy.home.resetTitle}
+          description={copy.home.resetDescription}
+          confirmLabel={copy.home.resetConfirm}
+          cancelLabel={copy.home.resetCancel}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false);
+            onReset();
+          }}
+        />
+      ) : null}
       {pages.length === 0 && shown.length === 0 ? (
         <EmptyState compact title={copy.home.recentTitle} description={copy.home.recentEmpty} />
       ) : (
@@ -115,7 +136,15 @@ export function HomePage() {
   const duties = usePrincipalDuties();
   const identity = usePrincipalIdentity();
   const now = useMemo(() => new Date(), []);
-  const activity = useMemo(() => readActivity(identity), [identity]);
+  const { clear: clearRecent } = useRecentPages();
+  const [resets, setResets] = useState(0);
+  const activity = useMemo(() => readActivity(identity), [identity, resets]);
+  const onReset = () => {
+    resetPersonalization(identity);
+    clearRecent();
+    setResets((n) => n + 1);
+    announce?.(copy.home.resetDone);
+  };
   const availability = useAiAvailability().state;
   const availabilityRef = useRef(availability);
   availabilityRef.current = availability;
@@ -203,7 +232,7 @@ export function HomePage() {
         <PinnedRegion />
         <WorkspaceKpis workspace={active} />
         {cards}
-        <Recent activity={activity} />
+        <Recent activity={activity} onReset={onReset} />
         {seeAll}
       </>
     );
@@ -227,7 +256,7 @@ export function HomePage() {
         {cards}
         {seeAll}
       </section>
-      <Recent activity={activity} />
+      <Recent activity={activity} onReset={onReset} />
     </>
   );
 }
