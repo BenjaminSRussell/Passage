@@ -69,7 +69,7 @@ func TestPostRMACredit_AC305_PostsARAndGLFromStoredData(t *testing.T) {
 		t.Fatalf("open items %+v %v", items, err)
 	}
 	entries := gl.Entries()
-	if len(entries) != 1 || len(entries[0].Lines) != 3 || entries[0].LedgerID != ledgerID || entries[0].IdempotencyKey != "rma-credit:"+legalEntity+":CN-RMA-0000001" {
+	if len(entries) != 1 || len(entries[0].Lines) != 3 || entries[0].LedgerID != ledgerID || entries[0].IdempotencyKey != "post:receivables:rma:CN-RMA-0000001:credit" {
 		t.Fatalf("journal %+v", entries)
 	}
 	l0, l1, l2 := entries[0].Lines[0], entries[0].Lines[1], entries[0].Lines[2]

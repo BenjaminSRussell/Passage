@@ -18,8 +18,6 @@ import (
 const (
 	deskEntrySourceType = "cash_desk_entry"
 	deskDiffSourceType  = "cash_desk_difference"
-	deskKeyPrefix       = "treasury-desk-"
-	deskDiffKeyPrefix   = "treasury-deskdiff-"
 )
 
 // deskPosting is the ledger side of one desk: its profile and the ledger account of its cash.
@@ -61,7 +59,7 @@ func deskEntryLedger(desk store.CashDesk, dp deskPosting, e store.CashDeskEntry)
 	}
 	payment := e.Kind == "payment"
 	return ledgerclient.Entry{LegalEntityID: dp.profile.LegalEntityID, LedgerID: dp.profile.LedgerID, DocumentID: desk.ID, PostingDate: e.BusinessDate,
-		Currency: desk.Currency, IdempotencyKey: deskKeyPrefix + e.ID, SourceType: deskEntrySourceType,
+		Currency: desk.Currency, IdempotencyKey: ledgerclient.MustPostingKey("treasury", "deskentry", e.ID, "post"), SourceType: deskEntrySourceType,
 		Lines: []ledgerclient.Line{{Account: dp.cash, Credit: payment, Amount: value, Text: text}, {Account: counter, Credit: !payment, Amount: value, Text: text}}}, ""
 }
 
@@ -74,7 +72,7 @@ func deskDifferenceLedger(desk store.CashDesk, dp deskPosting, date string, diff
 	short := diff.IsNegative()
 	value := diff.Abs()
 	return ledgerclient.Entry{LegalEntityID: dp.profile.LegalEntityID, LedgerID: dp.profile.LedgerID, DocumentID: desk.ID, PostingDate: date,
-		Currency: desk.Currency, IdempotencyKey: deskDiffKeyPrefix + desk.ID + "-" + date, SourceType: deskDiffSourceType,
+		Currency: desk.Currency, IdempotencyKey: ledgerclient.MustPostingKey("treasury", "deskdifference", desk.ID, "post", date), SourceType: deskDiffSourceType,
 		Lines: []ledgerclient.Line{{Account: dp.cash, Credit: short, Amount: value, Text: text}, {Account: dp.profile.CashDifferenceAccount, Credit: !short, Amount: value, Text: text}}}
 }
 

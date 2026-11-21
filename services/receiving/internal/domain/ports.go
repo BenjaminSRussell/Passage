@@ -16,8 +16,6 @@ import (
 )
 
 const (
-	LedgerPostPath        = "/v1/ledger/journal-entries"
-	LedgerReversePathTmpl = "/v1/ledger/journal-entries/%s/reverse"
 	PurchaseOrderPathTmpl = "/v1/procurement/purchase-orders/%s"
 )
 

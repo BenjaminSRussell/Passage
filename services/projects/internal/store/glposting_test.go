@@ -342,13 +342,13 @@ func TestGL_RetryResendsStoredBookingsAfterLostAnswerAndProfileChange(t *testing
 		byKey[e.IdempotencyKey] = e.ID
 	}
 	for _, b := range res.Booked {
-		if byKey["projects:txn:"+txn.ID+":1"] != b.EntryID && byKey["projects:wip:ES-RETRY:2026-10"] != b.EntryID {
+		if byKey["post:projects:transaction:"+txn.ID+":post:1"] != b.EntryID && byKey["post:projects:wip:ES-RETRY:post:2026-10"] != b.EntryID {
 			t.Fatalf("booked entry %s is not one of the ledger's: %+v", b.EntryID, byKey)
 		}
 	}
 	g.wantReconciled("retry")
 	got, err := g.s.ListTransactions(g.ctx, "ES-RETRY", "", 10)
-	if err != nil || len(got.Items) != 1 || got.Items[0].JournalID == nil || *got.Items[0].JournalID != byKey["projects:txn:"+txn.ID+":1"] {
+	if err != nil || len(got.Items) != 1 || got.Items[0].JournalID == nil || *got.Items[0].JournalID != byKey["post:projects:transaction:"+txn.ID+":post:1"] {
 		t.Fatalf("the transaction must carry the ledger entry: %+v %v", got, err)
 	}
 }

@@ -2,15 +2,13 @@ package domain
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/depot/platform/ledgerclient"
 	"github.com/BenjaminSRussell/depot/platform/money"
 )
-
-const invoiceKeyFormat = "post:receiving:vendorinvoice:%s:invoice"
 
 type PostLine struct {
 	Item         *GrirItem
@@ -68,7 +66,7 @@ func checkInvoiceHeader(in VendorInvoice, lines int, profile PostingProfile) err
 
 func buildInvoiceEntry(in VendorInvoice, lines []HeldLine, profile PostingProfile) JournalEntry {
 	entry := JournalEntry{
-		IdempotencyKey: fmt.Sprintf(invoiceKeyFormat, in.ID),
+		IdempotencyKey: ledgerclient.MustPostingKey("receiving", "vendorinvoice", in.ID, "invoice"),
 		LegalEntityID:  in.LegalEntityID,
 		LedgerID:       in.LedgerID,
 		PostingDate:    in.PostingDate,

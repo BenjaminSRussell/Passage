@@ -269,7 +269,7 @@ func (s *Postgres) decide(ctx context.Context, id string, in GLPostRequest, prof
 			date = *o.end
 		}
 		p = pendingBooking{seq: o.count + 1, legalEntityID: in.LegalEntityID, ledgerID: in.LedgerID, currency: in.Currency, date: date.UTC().Format(time.DateOnly),
-			key: fmt.Sprintf("eam-work-order:%s:%d", o.id, o.count+1), lines: o.lines(resolveProfile(profiles, o.typ), in.Currency), partsBasis: o.parts, laborBasis: o.labor}
+			key: ledgerclient.MustPostingKey("eam", "workorder", o.id, "post", fmt.Sprint(o.count+1)), lines: o.lines(resolveProfile(profiles, o.typ), in.Currency), partsBasis: o.parts, laborBasis: o.labor}
 		if len(p.lines) == 0 {
 			_, err = tx.Exec(ctx, `update work_order set gl_parts_basis = $3::numeric, gl_labor_basis = $4::numeric where tenant_id = $1 and id = $2`, t, id, o.parts.String(), o.labor.String())
 			return err

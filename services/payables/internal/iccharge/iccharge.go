@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,6 +30,7 @@ import (
 	"github.com/BenjaminSRussell/depot/platform/eventing"
 	"github.com/BenjaminSRussell/depot/platform/events"
 	"github.com/BenjaminSRussell/depot/platform/ids"
+	"github.com/BenjaminSRussell/depot/platform/ledgerclient"
 	"github.com/BenjaminSRussell/depot/platform/money"
 	"github.com/BenjaminSRussell/depot/platform/tenant"
 
@@ -304,7 +306,7 @@ func autoPost(ctx context.Context, s Store, auto *AutoPost, d Data, in store.Ven
 		date = today
 	}
 	entry := ledger.Entry{LegalEntityID: in.LegalEntityID, LedgerID: profile.LedgerID, DocumentID: in.ID, PostingDate: date, Currency: in.Currency,
-		IdempotencyKey: "payables-iccharge:" + in.SourceRef, SourceType: entrySourceType, Lines: lines}
+		IdempotencyKey: ledgerclient.MustPostingKey("payables", "iccharge", strings.ReplaceAll(in.SourceRef, ":", "-"), "post"), SourceType: entrySourceType, Lines: lines}
 	entryID, err := auto.Ledger.Post(ctx, entry)
 	var status *ledger.StatusError
 	if errors.As(err, &status) && status.Code == codePeriodClosed && date != today {

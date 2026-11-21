@@ -275,7 +275,7 @@ func (s *Postgres) planGL(ctx context.Context, in GLPostRequest, res *GLPostResu
 				continue
 			}
 			b, err := booking{kind: domain.GLKindTxn, projectID: r.projectID, legalEntityID: in.LegalEntityID, ledgerID: in.LedgerID, currency: in.Currency, date: r.date,
-				key: fmt.Sprintf("projects:txn:%s:1", r.id), status: statusPending, txnID: &r.id, lines: lines}.store(ctx, tx, p.TenantID)
+				key: ledgerclient.MustPostingKey("projects", "transaction", r.id, "post", "1"), status: statusPending, txnID: &r.id, lines: lines}.store(ctx, tx, p.TenantID)
 			if err != nil {
 				return err
 			}
@@ -317,7 +317,7 @@ func (s *Postgres) planEstimate(ctx context.Context, in GLPostRequest, pr glProj
 		if _, err := tx.Exec(ctx, `select 1 from project where tenant_id = $1 and id = $2 for update`, p.TenantID, pr.id); err != nil {
 			return err
 		}
-		key := fmt.Sprintf("projects:wip:%s:%s", pr.id, in.Period)
+		key := ledgerclient.MustPostingKey("projects", "wip", pr.id, "post", in.Period)
 		if b, err := loadBooking(ctx, tx, p.TenantID, key); err == nil {
 			if b.status == statusPending {
 				out = &b

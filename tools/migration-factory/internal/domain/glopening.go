@@ -34,7 +34,7 @@ type OpeningJournal struct {
 
 func OpeningKey(system SourceSystem, company, currency string) string {
 	sum := sha256.Sum256([]byte(string(system) + "\x1f" + company + "\x1f" + currency))
-	return "mf-gl-open-" + hex.EncodeToString(sum[:16])
+	return ledgerclient.MustPostingKey("migrationfactory", "glopening", hex.EncodeToString(sum[:16]), "post")
 }
 
 func ParsePostingDate(s string) (string, error) {

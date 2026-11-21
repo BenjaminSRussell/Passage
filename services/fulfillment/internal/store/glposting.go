@@ -29,7 +29,6 @@ const (
 	codeUnavailable   = "COM-0503"
 	slipGLSourceType  = "fulfillment-packing-slip"
 	slipGLActor       = "system:fulfillment-slip-gl"
-	slipGLKeyPrefix   = "post:fulfillment:packingslip:"
 	slipGLBatch       = 50
 	slipGLLease       = 2 * time.Minute
 	slipGLInterval    = 30 * time.Second
@@ -108,7 +107,7 @@ func slipEntry(slip PackingSlip, legalEntityID, ledgerID string) ledgerclient.En
 		lines = append(lines, ledgerclient.Line{Account: j.Account, Credit: j.Amount.IsNegative(), Amount: j.Amount.Abs(), Text: slip.Number})
 	}
 	return ledgerclient.Entry{LegalEntityID: legalEntityID, LedgerID: ledgerID, DocumentID: slip.ID, PostingDate: slip.PostingDate.Format(dateLayout),
-		Currency: slip.Currency, IdempotencyKey: slipGLKeyPrefix + slip.ID + ":" + purpose, SourceType: slipGLSourceType, Lines: lines}
+		Currency: slip.Currency, IdempotencyKey: ledgerclient.MustPostingKey("fulfillment", "packingslip", slip.ID, purpose), SourceType: slipGLSourceType, Lines: lines}
 }
 
 type claimedSlipGL struct {

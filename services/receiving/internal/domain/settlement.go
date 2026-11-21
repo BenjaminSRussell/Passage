@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/depot/platform/ledgerclient"
 )
 
 const (
@@ -22,7 +24,6 @@ const (
 	PlanRowInvoiced           = "INVOICED"
 	CodeOverCredit            = "AP-CRD-001"
 	CodePlanSettled           = "AP-PLN-001"
-	settlementKeyFormat       = "post:receiving:settlement:%s:%s"
 )
 
 var (
@@ -196,7 +197,7 @@ func PostSettlement(ctx context.Context, s Settlement, periods PeriodControl, le
 	}
 	amount := roundedMoney(s.Amount, s.Currency)
 	entry := JournalEntry{
-		IdempotencyKey: fmt.Sprintf(settlementKeyFormat, s.ID, strings.ToLower(s.Kind)),
+		IdempotencyKey: ledgerclient.MustPostingKey("receiving", "settlement", s.ID, strings.ToLower(s.Kind)),
 		LegalEntityID:  s.LegalEntityID,
 		LedgerID:       s.LedgerID,
 		PostingDate:    s.PostingDate,

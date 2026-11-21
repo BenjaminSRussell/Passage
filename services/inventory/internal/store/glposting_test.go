@@ -96,7 +96,7 @@ func TestPostToGLBooksStoredEntriesOnce(t *testing.T) {
 		t.Fatalf("ledger entries %+v", entries)
 	}
 	e := entries[0]
-	if e.IdempotencyKey != "inventory-journal:"+opening.ID || e.LedgerID != ledgerID || e.LegalEntityID != entity || e.PostingDate != "2026-09-01" ||
+	if e.IdempotencyKey != "post:inventory:journal:"+opening.ID+":post" || e.LedgerID != ledgerID || e.LegalEntityID != entity || e.PostingDate != "2026-09-01" ||
 		e.Currency != "USD" || len(e.Lines) != 2 || e.Lines[0].Account != inventoryAccount || e.Lines[0].Credit || !e.Lines[0].Amount.Equal(dec("25")) ||
 		e.Lines[1].Account != openingAccount || !e.Lines[1].Credit || !e.Lines[1].Amount.Equal(dec("25")) {
 		t.Fatalf("opening entry %+v", e)

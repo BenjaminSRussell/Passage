@@ -191,7 +191,7 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request) {
 	for _, p := range pending {
 		entryID, err := a.ledger.Post(r.Context(), ledgerclient.Entry{
 			LegalEntityID: p.LegalEntityID, LedgerID: p.LedgerID, DocumentID: p.ID, PostingDate: p.PostingDate.Format(dateLayout),
-			Currency: p.Currency, IdempotencyKey: "revrec-posting-" + p.ID, SourceType: journalSourceType,
+			Currency: p.Currency, IdempotencyKey: ledgerclient.MustPostingKey("revrec", "posting", p.ID, "post"), SourceType: journalSourceType,
 			Lines: []ledgerclient.Line{
 				{Account: store.DeferredAccount, Amount: p.Amount, Text: "Revenue recognized"},
 				{Account: store.RevenueAccount, Credit: true, Amount: p.Amount, Text: "Revenue recognized"},
@@ -278,9 +278,9 @@ func (a *API) postReversals(w http.ResponseWriter, r *http.Request, legalEntityI
 		out.elsewhere = append(out.elsewhere, o)
 	}
 	for _, rp := range due {
-		text, key := "Revenue reversed by credit note "+rp.CreditNoteNumber, "revrec-reversal-"+rp.ID
+		text, key := "Revenue reversed by credit note "+rp.CreditNoteNumber, ledgerclient.MustPostingKey("revrec", "creditnote", rp.ID, "reverse")
 		if rp.ModificationID != "" {
-			text, key = "Revenue reduced by contract modification", "revrec-modrev-"+rp.ID
+			text, key = "Revenue reduced by contract modification", ledgerclient.MustPostingKey("revrec", "modification", rp.ID, "reverse")
 		}
 		entryID, err := a.ledger.Post(ctx, ledgerclient.Entry{
 			LegalEntityID: rp.LegalEntityID, LedgerID: rp.LedgerID, DocumentID: rp.ID, PostingDate: rp.PostingDate.Format(dateLayout),

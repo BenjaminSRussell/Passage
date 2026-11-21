@@ -2,11 +2,11 @@ package domain
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/depot/platform/ledgerclient"
 	"github.com/BenjaminSRussell/depot/platform/money"
 )
 
@@ -23,8 +23,6 @@ const (
 
 	ReceiptSourceProduct = "PRODUCT"
 	ReceiptSourceService = "SERVICE_ENTRY_SHEET"
-
-	serviceSheetKeyFormat = "post:receiving:serviceentrysheet:%s:accrual"
 )
 
 type SheetLine struct {
@@ -74,7 +72,7 @@ func PostServiceSheet(ctx context.Context, in ServiceAccrual, periods PeriodCont
 		return JournalEntry{}, nil, err
 	}
 	entry := JournalEntry{
-		IdempotencyKey: fmt.Sprintf(serviceSheetKeyFormat, in.ID),
+		IdempotencyKey: ledgerclient.MustPostingKey("receiving", "serviceentrysheet", in.ID, "accrual"),
 		LegalEntityID:  in.LegalEntityID,
 		LedgerID:       in.LedgerID,
 		PostingDate:    in.PostingDate,

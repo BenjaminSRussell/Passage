@@ -326,7 +326,7 @@ func (s *Postgres) CreateAdjustment(ctx context.Context, in AdjustmentRequest, i
 			}
 			key := adjustmentKeyPrefix + adj.ID
 			if err := insertVoucher(ctx, tx, p.TenantID, voucher{legalEntityID: adj.LegalEntityID, sourceKey: key, glLedgerID: profile.GLLedgerID,
-				currency: adj.Currency, date: adj.FinancialDate, key: "costing-" + strings.ReplaceAll(key, ":", "-"),
+				currency: adj.Currency, date: adj.FinancialDate, key: voucherKey(key),
 				lines: domain.CloseVoucher(profile.accounts(), plan.Delta)}); err != nil {
 				return err
 			}

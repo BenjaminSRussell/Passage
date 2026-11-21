@@ -277,7 +277,7 @@ func (r *Reconciler) AdjustFX(ctx context.Context, itemID string) (domain.FXAdju
 		}
 		// An increase debits the due-from account and credits the FX account; a decrease does the opposite.
 		return ledgerclient.Entry{LegalEntityID: adj.Target.LegalEntityID, LedgerID: adj.Target.LedgerID, DocumentID: adj.ID, PostingDate: date.Format(time.DateOnly), Currency: adj.Currency,
-			IdempotencyKey: "ic-fx:" + adj.ID, SourceType: posting.SourceType, Lines: []ledgerclient.Line{
+			IdempotencyKey: ledgerclient.MustPostingKey("intercompany", "fxadjustment", adj.ID, "post"), SourceType: posting.SourceType, Lines: []ledgerclient.Line{
 				{Account: adj.BalanceAccount, Credit: !adj.IncreasesBalance, Amount: adj.Amount, Text: text, TradingPartnerID: partner},
 				{Account: adj.FXAccount, Credit: adj.IncreasesBalance, Amount: adj.Amount, Text: text},
 			}}

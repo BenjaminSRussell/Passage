@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/depot/platform/ledgerclient"
 )
 
 type Txn struct {
@@ -57,7 +59,9 @@ type Settlement struct {
 
 func MovementKey(code, direction string) string { return code + "|" + direction }
 
-func PostingKey(settlementID string) string { return "post:tax:settlement:" + settlementID + ":settle" }
+func PostingKey(settlementID string) string {
+	return ledgerclient.MustPostingKey("tax", "settlement", settlementID, "settle")
+}
 
 type bucket struct {
 	code, direction string

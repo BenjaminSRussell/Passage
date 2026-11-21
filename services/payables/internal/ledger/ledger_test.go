@@ -191,7 +191,7 @@ func postCtx() context.Context {
 }
 
 func postEntry() ledger.Entry {
-	return ledger.Entry{LegalEntityID: testkit.TenantID(9), LedgerID: "led-1", DocumentID: "run-1", PostingDate: "2026-01-10", Currency: "USD", IdempotencyKey: "payables:payment-run:run-1", SourceType: "payment_run",
+	return ledger.Entry{LegalEntityID: testkit.TenantID(9), LedgerID: "led-1", DocumentID: "run-1", PostingDate: "2026-01-10", Currency: "USD", IdempotencyKey: "post:payables:paymentrun:run-1:post", SourceType: "payment_run",
 		Lines: []domain.RunJournalLine{{Account: "2000", Amount: decimal.RequireFromString("150"), Text: "vendor v1"}, {Account: "1010", Credit: true, Amount: decimal.RequireFromString("150")}}}
 }
 
@@ -209,7 +209,7 @@ func TestPost_SendsABalancedEntryWithTheIdempotencyKeyAndAServiceToken(t *testin
 	if err != nil || id != "entry-9" {
 		t.Fatalf("id=%s err=%v", id, err)
 	}
-	if key != "payables:payment-run:run-1" || tenantHeader == "" || path != "/v1/ledger/journal-entries" {
+	if key != "post:payables:paymentrun:run-1:post" || tenantHeader == "" || path != "/v1/ledger/journal-entries" {
 		t.Fatalf("key=%s tenant=%s path=%s", key, tenantHeader, path)
 	}
 	lines := body["lines"].([]any)
@@ -329,7 +329,7 @@ func TestPost_SignedSendsOnlyThePostingDutyForTheRunsLegalEntity(t *testing.T) {
 	if _, err := ledger.New(srv.URL, nil).WithSigner(signer).Post(tenant.With(context.Background(), principal), entry); err != nil {
 		t.Fatal(err)
 	}
-	if got.Get(tenant.HeaderDuties) != "" || got.Get("Idempotency-Key") != "payables:payment-run:run-1" {
+	if got.Get(tenant.HeaderDuties) != "" || got.Get("Idempotency-Key") != "post:payables:paymentrun:run-1:post" {
 		t.Fatalf("headers %v", got)
 	}
 	claims, err := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"payables": pub}).Verify(got.Get(tenant.HeaderServiceToken))

@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +23,7 @@ const (
 	tenantID   = "00000000-0000-0000-0000-000000000001"
 	ledgerID   = "00000000-0000-4000-8000-0000000000a1"
 	documentID = "00000000-0000-4000-8000-0000000000d1"
+	entityID   = "00000000-0000-4000-8000-0000000000e1"
 )
 
 // ledgerPostEntryRequest mirrors postEntryRequest, sourceDTO, lineDTO and amountDTO
@@ -112,9 +112,10 @@ func TestReverseBodyDecodesIntoTheLedgersRequestShape(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"journalEntryId":"R1"}`))
 	}))
 	t.Cleanup(srv.Close)
-	if err := New(srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", "", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+	if err := signedNew(t, srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", entityID, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 	var got ledgerReverseRequest
@@ -128,7 +129,7 @@ func testEntry() domain.JournalEntry {
 	day := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	return domain.JournalEntry{
 		IdempotencyKey: "post:receiving:productreceipt:r-1:receipt",
-		LegalEntityID:  "le-1",
+		LegalEntityID:  entityID,
 		LedgerID:       ledgerID,
 		PostingDate:    day,
 		DocumentDate:   day,
@@ -142,7 +143,7 @@ func testEntry() domain.JournalEntry {
 }
 
 func testCtx() context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: entityID, UserID: "u-1"})
 }
 
 func serve(t *testing.T, status int, body string) (*Client, *http.Request, *[]byte) {
@@ -156,7 +157,7 @@ func serve(t *testing.T, status int, body string) (*Client, *http.Request, *[]by
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	return New(srv.URL, nil), &got, &raw
+	return signedNew(t, srv.URL, nil), &got, &raw
 }
 
 func TestPost_SendsHeadersAndBodyAndReturnsID(t *testing.T) {
@@ -166,26 +167,15 @@ func TestPost_SendsHeadersAndBodyAndReturnsID(t *testing.T) {
 		if err != nil || id != "je-9" {
 			t.Fatalf("status %d: id %q err %v", status, id, err)
 		}
-		if got.URL.Path != domain.LedgerPostPath || got.Method != http.MethodPost {
+		if got.URL.Path != "/v1/ledger/journal-entries" || got.Method != http.MethodPost {
 			t.Fatalf("request %s %s", got.Method, got.URL.Path)
 		}
-		if got.Header.Get("Idempotency-Key") != "post:receiving:productreceipt:r-1:receipt" || got.Header.Get("X-Depot-Tenant") != tenantID {
+		if got.Header.Get("Idempotency-Key") != "post:receiving:productreceipt:r-1:receipt" || got.Header.Get(tenant.HeaderServiceToken) == "" {
 			t.Fatalf("headers %v", got.Header)
 		}
 		if strings.Contains(string(*raw), "post:receiving") {
 			t.Fatal("idempotency key must travel in the header only")
 		}
-	}
-}
-
-func TestPostForwardsTheCallersDutiesAndUser(t *testing.T) {
-	client, got, _ := serve(t, http.StatusCreated, `{"journalEntryId":"je-1"}`)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "le-1", UserID: "u-1", Duties: map[string]struct{}{"receiving.receipt.post": {}, "ledger.journal.post": {}}})
-	if _, err := client.Post(ctx, testEntry()); err != nil {
-		t.Fatal(err)
-	}
-	if got.Header.Get("X-Depot-Duties") != "ledger.journal.post,receiving.receipt.post" || got.Header.Get("X-Depot-User") != "u-1" || got.Header.Get("X-Depot-Legal-Entity") != "le-1" {
-		t.Fatalf("headers %v", got.Header)
 	}
 }
 
@@ -226,7 +216,7 @@ func TestPost_TimeoutIsNotPeriodClosed(t *testing.T) {
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
 	t.Cleanup(func() { close(release); srv.Close() })
-	client := New(srv.URL, &http.Client{Timeout: 50 * time.Millisecond})
+	client := signedNew(t, srv.URL, &http.Client{Timeout: 50 * time.Millisecond})
 	id, err := client.Post(testCtx(), testEntry())
 	if err == nil || id != "" || errors.Is(err, domain.ErrPeriodClosed) {
 		t.Fatalf("got %q %v", id, err)
@@ -259,7 +249,7 @@ func TestPost_RejectsBeforeSending(t *testing.T) {
 			called := false
 			srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 			defer srv.Close()
-			if _, err := New(srv.URL, nil).Post(tc.ctx, tc.entry); err == nil || called {
+			if _, err := signedNew(t, srv.URL, nil).Post(tc.ctx, tc.entry); err == nil || called {
 				t.Fatalf("err %v called %v", err, called)
 			}
 		})
@@ -273,16 +263,13 @@ func TestPathsMatchTheLedgerServiceRouteTable(t *testing.T) {
 	}
 	for _, want := range []string{`r.Route("/v1/ledger"`, `Post("/journal-entries", a.postEntry)`, `Post("/journal-entries/{id}/reverse", a.reverseEntry)`} {
 		if !strings.Contains(string(src), want) {
-			t.Fatalf("ledger route table no longer contains %s; update domain.LedgerPostPath and LedgerReversePathTmpl", want)
+			t.Fatalf("ledger route table no longer contains %s; update platform/ledgerclient", want)
 		}
-	}
-	if domain.LedgerPostPath != "/v1/ledger/journal-entries" || fmt.Sprintf(domain.LedgerReversePathTmpl, "E1") != "/v1/ledger/journal-entries/E1/reverse" {
-		t.Fatalf("paths %s %s do not match the ledger routes", domain.LedgerPostPath, domain.LedgerReversePathTmpl)
 	}
 }
 
 func TestPostReadsTheLedgerEntriesResponseAndClassifiesRejections(t *testing.T) {
-	entry := domain.JournalEntry{IdempotencyKey: "k", LegalEntityID: "le", Lines: []domain.JournalLine{{Account: "1400", Amount: money.Must("5.00", "USD")}, {Account: "2100", Amount: money.Must("-5.00", "USD")}}}
+	entry := domain.JournalEntry{IdempotencyKey: "k", LegalEntityID: entityID, LedgerID: ledgerID, Lines: []domain.JournalLine{{Account: "1400", Amount: money.Must("5.00", "USD")}, {Account: "2100", Amount: money.Must("-5.00", "USD")}}}
 	tests := []struct {
 		name     string
 		status   int
@@ -316,11 +303,11 @@ func TestReverseCallsTheReverseRouteWithItsOwnKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = r
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{"journalEntryId":"R1"}`))
 	}))
 	t.Cleanup(srv.Close)
 	day := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	if err := New(srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", "", day); err != nil {
+	if err := signedNew(t, srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", entityID, day); err != nil {
 		t.Fatal(err)
 	}
 	if got.URL.Path != "/v1/ledger/journal-entries/E1/reverse" || got.Header.Get("Idempotency-Key") != "k:reverse" {
@@ -328,7 +315,7 @@ func TestReverseCallsTheReverseRouteWithItsOwnKey(t *testing.T) {
 	}
 	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
 	t.Cleanup(failing.Close)
-	if err := New(failing.URL, nil).Reverse(testCtx(), "E1", "k", "", day); err == nil {
+	if err := signedNew(t, failing.URL, nil).Reverse(testCtx(), "E1", "k", entityID, day); err == nil {
 		t.Fatal("a failed reversal must surface")
 	}
 }
@@ -353,7 +340,7 @@ func TestReverseClassifiesLedgerRejectionsApartFromOutages(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			client, _, _ := serve(t, tc.status, tc.body)
-			err := client.Reverse(testCtx(), "E1", "k", "", day)
+			err := client.Reverse(testCtx(), "E1", "k", entityID, day)
 			if err == nil || errors.Is(err, domain.ErrPeriodClosed) != tc.closed || errors.Is(err, domain.ErrLedgerRejected) != tc.rejected || errors.Is(err, domain.ErrLedgerConflict) != tc.conflict {
 				t.Fatalf("err=%v, want closed=%v rejected=%v conflict=%v", err, tc.closed, tc.rejected, tc.conflict)
 			}
@@ -370,11 +357,17 @@ func TestPost_DoesNotFollowRedirectsWithTheCallersIdentity(t *testing.T) {
 	}))
 	t.Cleanup(redirector.Close)
 
-	_, err := New(redirector.URL, nil).Post(testCtx(), testEntry())
+	_, err := signedNew(t, redirector.URL, nil).Post(testCtx(), testEntry())
 
 	if err == nil || followed {
 		t.Fatalf("redirect followed %v, err %v", followed, err)
 	}
+}
+
+func signedNew(t *testing.T, url string, httpClient *http.Client) *Client {
+	t.Helper()
+	signer, _ := testSigner(t)
+	return New(url, httpClient).WithSigner(signer)
 }
 
 func testSigner(t *testing.T) (*tenant.ServiceSigner, *tenant.ServiceVerifier) {
@@ -412,7 +405,7 @@ func TestSignedPostSendsServiceTokenInsteadOfUserDuties(t *testing.T) {
 func TestSignedReverseUsesPrincipalLegalEntity(t *testing.T) {
 	const entity = "00000000-0000-4000-8000-0000000000e1"
 	signer, verifier := testSigner(t)
-	client, got, _ := serve(t, http.StatusCreated, `{}`)
+	client, got, _ := serve(t, http.StatusCreated, `{"journalEntryId":"R1"}`)
 	client.WithSigner(signer)
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: entity, UserID: "u-1"})
 	if err := client.Reverse(ctx, "je-1", "rev-key", "", time.Now()); err != nil {
@@ -451,7 +444,7 @@ func TestSignedPostForAnotherEntityThanTheUsersScopeIsRefusedAndNothingIsSent(t 
 func TestSignedReverseForAMultiEntityUserSignsTheExplicitEntity(t *testing.T) {
 	const entity = "00000000-0000-4000-8000-0000000000e1"
 	signer, verifier := testSigner(t)
-	client, got, _ := serve(t, http.StatusCreated, `{}`)
+	client, got, _ := serve(t, http.StatusCreated, `{"journalEntryId":"R1"}`)
 	client.WithSigner(signer)
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: entity + ",00000000-0000-4000-8000-0000000000e2", UserID: "u-1"})
 	if err := client.Reverse(ctx, "je-1", "rev-key", entity, time.Now()); err != nil {

@@ -90,15 +90,19 @@ func OrderReplay(docs []ReplayDocument) []ReplayDocument {
 }
 
 // ReplayKey is the idempotency key of a replayed document, so a replay run twice books it once.
-func ReplayKey(system SourceSystem, period, documentID string) string {
+func replayDigest(system SourceSystem, period, documentID string) string {
 	sum := sha256.Sum256([]byte(string(system) + "\x1f" + period + "\x1f" + documentID))
-	return "mf-replay-" + hex.EncodeToString(sum[:16])
+	return hex.EncodeToString(sum[:16])
+}
+
+func ReplayKey(system SourceSystem, period, documentID string) string {
+	return ledgerclient.MustPostingKey("migrationfactory", "replay", replayDigest(system, period, documentID), "post")
 }
 
 // ReplayEntry is the ledger entry a legacy document is replayed as.
 func ReplayEntry(system SourceSystem, period string, d ReplayDocument, legalEntityID, ledgerID string) ledgerclient.Entry {
 	e := ledgerclient.Entry{LegalEntityID: legalEntityID, LedgerID: ledgerID, DocumentID: d.DocumentID, PostingDate: d.PostingDate,
-		Currency: d.Currency, IdempotencyKey: ReplayKey(system, period, d.DocumentID), SourceType: ReplaySourceType}
+		Currency: d.Currency, IdempotencyKey: ledgerclient.MustPostingKey("migrationfactory", "replay", replayDigest(system, period, d.DocumentID), "post"), SourceType: ReplaySourceType}
 	for _, l := range d.Lines {
 		e.Lines = append(e.Lines, ledgerclient.Line{Account: l.Account, Credit: l.Amount.IsNegative(), Amount: l.Amount.Abs(), Text: l.Text})
 	}

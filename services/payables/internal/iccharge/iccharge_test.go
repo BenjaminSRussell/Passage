@@ -179,7 +179,7 @@ func TestHandle_AutoPostsTheVendorInvoiceOnceWhenThePairingOptedIn(t *testing.T)
 	if led.calls != 1 || len(led.entries) != 1 {
 		t.Fatalf("ledger calls = %d entries = %d, want one", led.calls, len(led.entries))
 	}
-	e := led.entries["payables-iccharge:"+data["id"].(string)+":1"]
+	e := led.entries["post:payables:iccharge:"+data["id"].(string)+"-1:post"]
 	got := map[string]string{}
 	for _, l := range e.Lines {
 		side := "D"
@@ -250,7 +250,7 @@ func TestHandle_AutoPostMovesPastAClosedPeriod(t *testing.T) {
 	if err != nil || row.Status != "POSTED" || row.InvoiceDate != "2026-10-30" {
 		t.Fatalf("closed October = %+v, %v", row, err)
 	}
-	e := led.entries["payables-iccharge:"+d["id"].(string)+":1"]
+	e := led.entries["post:payables:iccharge:"+d["id"].(string)+"-1:post"]
 	if e.PostingDate != "2026-11-15" || !strings.Contains(e.Lines[0].Text, "dated 2026-10-30") {
 		t.Fatalf("entry date %s text %q; want today with the charge date", e.PostingDate, e.Lines[0].Text)
 	}
@@ -383,7 +383,7 @@ func TestHandle_AutoPostNamesTheLenderAsTradingPartner(t *testing.T) {
 	if _, err := iccharge.Handle(consumerCtx(t), s, auto, event(t, data, publishedSource)); err != nil {
 		t.Fatal(err)
 	}
-	e := led.entries["payables-iccharge:"+data["id"].(string)+":1"]
+	e := led.entries["post:payables:iccharge:"+data["id"].(string)+"-1:post"]
 	got := map[string]string{}
 	for _, l := range e.Lines {
 		got[l.Account] = l.TradingPartnerID

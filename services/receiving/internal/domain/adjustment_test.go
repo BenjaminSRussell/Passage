@@ -31,7 +31,7 @@ func TestPostInvoiceAdjustment_DebitPostsPriceDifferenceAndCreditsVendor(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.LedgerEntryID != "fake-entry-1" || entry.IdempotencyKey != "post:receiving:invoiceadjustment:adj-1" {
+	if entry.LedgerEntryID != "fake-entry-1" || entry.IdempotencyKey != "post:receiving:invoiceadjustment:adj-1:adjustment" {
 		t.Fatalf("entry %+v", entry)
 	}
 	if ledger.Balance("1400").String() != "3.5" || ledger.Balance("5200").String() != "1.25" || ledger.Balance("2000").String() != "-4.75" || !ledger.Balance("2100").IsZero() {

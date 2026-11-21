@@ -10,6 +10,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/depot/platform/ledgerclient"
 	"github.com/BenjaminSRussell/depot/platform/money"
 )
 
@@ -26,10 +27,6 @@ const (
 	CodePostingPending    = "RCV-IDM-001"
 	CodeLedgerRejected    = "RCV-LDG-001"
 	CodeServiceReceipt    = "RCV-SVC-001"
-
-	receiptKeyFormat    = "post:receiving:productreceipt:%s:receipt"
-	correctionKeyFormat = "post:receiving:productreceipt:%s:correction:%d"
-	cancelKeyFormat     = "post:receiving:productreceipt:%s:cancel"
 )
 
 type Error struct{ Code, Detail string }
@@ -175,7 +172,7 @@ func (r Receipt) Post(ctx context.Context, ledger LedgerPoster, profile PostingP
 		return r, nil, err
 	}
 	entry := JournalEntry{
-		IdempotencyKey: fmt.Sprintf(receiptKeyFormat, r.ID),
+		IdempotencyKey: ledgerclient.MustPostingKey("receiving", "productreceipt", r.ID, "receipt"),
 		LegalEntityID:  r.LegalEntityID,
 		LedgerID:       profile.LedgerID,
 		PostingDate:    r.Date,
@@ -334,7 +331,7 @@ func (r Receipt) Correct(ctx context.Context, ledger LedgerPoster, profile Posti
 	if len(changes) != len(deltas) {
 		return "", nil, fail(CodeInvalidReceipt, "correction names lines the receipt does not have")
 	}
-	entryID, err := postReceiptEntry(ctx, ledger, r.adjustmentEntry(fmt.Sprintf(correctionKeyFormat, r.ID, seq), date, changes, profile), r.ID)
+	entryID, err := postReceiptEntry(ctx, ledger, r.adjustmentEntry(ledgerclient.MustPostingKey("receiving", "productreceipt", r.ID, "correction", fmt.Sprint(seq)), date, changes, profile), r.ID)
 	return entryID, changes, err
 }
 
@@ -354,5 +351,5 @@ func (r Receipt) Cancel(ctx context.Context, ledger LedgerPoster, profile Postin
 	for i, l := range r.Lines {
 		changes[i] = LineChange{LineNo: l.LineNo, Qty: decimal.Zero, Amount: money.Amount{Value: decimal.Zero, Currency: l.UnitPrice.Currency}}
 	}
-	return postReceiptEntry(ctx, ledger, r.adjustmentEntry(fmt.Sprintf(cancelKeyFormat, r.ID), date, changes, profile), r.ID)
+	return postReceiptEntry(ctx, ledger, r.adjustmentEntry(ledgerclient.MustPostingKey("receiving", "productreceipt", r.ID, "cancel"), date, changes, profile), r.ID)
 }

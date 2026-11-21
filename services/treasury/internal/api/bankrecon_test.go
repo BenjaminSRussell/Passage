@@ -217,7 +217,7 @@ func TestCreateLineTransaction_PostsOnceAndAnswersARepeatWithTheSameTransaction(
 		t.Fatalf("status = %d %s; want 201", code, body)
 	}
 	entries := s.ledger.Entries()
-	if len(entries) != 1 || entries[0].IdempotencyKey != "treasury-line-"+reconStatement+"-4" || entries[0].LedgerID != testLedger || entries[0].SourceType != "bank_statement_line" {
+	if len(entries) != 1 || entries[0].IdempotencyKey != "post:treasury:statementline:"+reconStatement+":post:4" || entries[0].LedgerID != testLedger || entries[0].SourceType != "bank_statement_line" {
 		t.Fatalf("ledger entries = %+v; want one entry keyed by the statement line", entries)
 	}
 	lines := entries[0].Lines

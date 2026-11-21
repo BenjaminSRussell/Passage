@@ -23,7 +23,6 @@ import (
 const (
 	EnvGLProfiles     = "TREASURY_GL_PROFILES"
 	lineSourceType    = "bank_statement_line"
-	lineKeyPrefix     = "treasury-line-"
 	maxLineTextLength = 60
 )
 
@@ -90,7 +89,7 @@ func (a *API) WithLedger(ledger ledgerclient.Ledger, profiles map[string]GLProfi
 
 func lineEntry(p GLProfile, statementID string, t store.LineTransaction) (ledgerclient.Entry, string, string) {
 	e := ledgerclient.Entry{LegalEntityID: p.LegalEntityID, LedgerID: p.LedgerID, DocumentID: statementID, PostingDate: t.PostingDate,
-		Currency: t.Currency, IdempotencyKey: fmt.Sprintf("%s%s-%d", lineKeyPrefix, statementID, t.LineNo), SourceType: lineSourceType}
+		Currency: t.Currency, IdempotencyKey: ledgerclient.MustPostingKey("treasury", "statementline", statementID, "post", fmt.Sprint(t.LineNo)), SourceType: lineSourceType}
 	bank, ok := p.BankAccounts[t.BankAccountID]
 	if !ok {
 		return e, CodeLedgerNoProfile, "the posting profile has no ledger account for this bank account"

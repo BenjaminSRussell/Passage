@@ -33,7 +33,6 @@ const (
 	CodeGLLinesMismatch = "EXP-GL-006"
 	dutyGLPost          = "expense.gl.post"
 	glSourceType        = "expense_report"
-	glKeyPrefix         = "expense-report-"
 	defaultGLBatch      = 200
 	EnvGLProfiles       = "EXPENSE_GL_PROFILES"
 )
@@ -117,7 +116,7 @@ type glFailedOut struct {
 func glEntry(p GLProfile, g store.GLReport) (ledgerclient.Entry, string, string) {
 	mu := pmoney.MinorUnits(g.Currency)
 	e := ledgerclient.Entry{LegalEntityID: p.LegalEntityID, LedgerID: p.LedgerID, DocumentID: g.ID, PostingDate: g.ApprovedOn,
-		Currency: g.Currency, IdempotencyKey: glKeyPrefix + g.ID, SourceType: glSourceType}
+		Currency: g.Currency, IdempotencyKey: ledgerclient.MustPostingKey("expense", "report", g.ID, "post"), SourceType: glSourceType}
 	text := "expense report " + g.ID[:8]
 	categories := make([]string, 0, len(g.ByCategory))
 	for c := range g.ByCategory {
