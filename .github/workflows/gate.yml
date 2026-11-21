@@ -71,6 +71,7 @@ jobs:
               - 'services/agents-ts/**'
               - 'services/mcp-ts/**'
               - 'evals/**'
+              - 'policies/authz/data.json'
               - '.github/workflows/**'
             charts:
               - 'services/**/charts/**'

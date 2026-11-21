@@ -251,7 +251,50 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"ledger.journal.rateoverride", "audit.auditor", "audit.cdc.apply", "audit.chain.anchor", "receivables.write-off.approve","purchasing.inbound.apply", "edi.pii.view", "edi.outbound.from-event", "tax.code.maintain", "fulfillment.order.sync", "budget.override", "inventory.blocking.scrap", "ledger.journal.postdirect", "ledger.journal.postledger", "ledger.period.postclosed", "org.hierarchy.backdate", "party.merge", "pii.read", "pricing.cache.invalidate", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.planned.intake", "receivables.openitem.from-billing", "billing.iccharge.from-event", "payables.iccharge.from-event", "intercompany.charge.from-event", "revrec.creditnote.reverse", "revrec.contract.from-invoice", "production.order.zero-output", "production.jobcard.shopfloor", "scheduling.constraints.override", "scheduling.order.import", "search.index.write", "shopfloor.job.sync", "tenant.administer", "treasury.facility.override", "cui.view", "agentapproval.decide"}
+	flag_duties := {
+		"ledger.journal.rateoverride",
+		"audit.auditor",
+		"audit.cdc.apply",
+		"audit.chain.anchor",
+		"receivables.write-off.approve",
+		"purchasing.inbound.apply",
+		"edi.pii.view",
+		"edi.outbound.from-event",
+		"tax.code.maintain",
+		"fulfillment.order.sync",
+		"budget.override",
+		"inventory.blocking.scrap",
+		"ledger.journal.postdirect",
+		"ledger.journal.postledger",
+		"ledger.period.postclosed",
+		"org.hierarchy.backdate",
+		"party.merge",
+		"pii.read",
+		"pricing.cache.invalidate",
+		"production.batch.consume-expired",
+		"production.journal.over-consume",
+		"production.order.bom-after-release",
+		"production.order.rework",
+		"production.planned.intake",
+		"receivables.openitem.from-billing",
+		"billing.iccharge.from-event",
+		"payables.iccharge.from-event",
+		"intercompany.charge.from-event",
+		"revrec.creditnote.reverse",
+		"revrec.contract.from-invoice",
+		"production.order.zero-output",
+		"production.jobcard.shopfloor",
+		"scheduling.constraints.override",
+		"scheduling.order.import",
+		"search.index.write",
+		"shopfloor.job.sync",
+		"tenant.administer",
+		"treasury.facility.override",
+		"cui.view",
+		"agentapproval.decide",
+		"agents.sensitive-payroll.view",
+		"agents.sensitive-worker.view",
+	}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -3890,6 +3933,37 @@ test_cui_view_is_a_flag_duty_no_designation_duty_grants if {
 	not data.duties["cui.view"].operator_only
 	not data.duties["datadesignation.write"].flag
 	not data.duties["datadesignation.read"].flag
+}
+
+# TODO: DEPOT-349 write the scoped-holder test (a legal-entity-scoped grant of these duties holds only in its own entity) together with the role grant.
+# The output guard in services/agents-ts reads the token duties claim, not held_duties, so these cases pin the policy data only.
+sensitive_view_duties := ["agents.sensitive-payroll.view", "agents.sensitive-worker.view"]
+
+test_sensitive_view_duties_are_not_tenant_level_or_operator_only if {
+	every duty in sensitive_view_duties {
+		data.duties[duty]
+		not data.duties[duty].tenant_level
+		not data.duties[duty].operator_only
+	}
+}
+
+# A tripwire against hand-seeding an assignment into data.json (the shipped maps are empty; identity compiles real assignments into the bundle at runtime). It does not check real grants.
+test_no_shipped_assignment_holds_the_sensitive_view_duties if {
+	every duty in sensitive_view_duties {
+		tenant_wide := {held |
+			some _, users in data.assignments
+			some _, assigned in users
+			some held in assigned
+		}
+		scoped := {held |
+			some _, users in data.scoped_assignments
+			some _, entities in users
+			some _, assigned in entities
+			some held in assigned
+		}
+		not duty in tenant_wide
+		not duty in scoped
+	}
 }
 
 cui_input(legal_entity) := {"subject": {"tenant_id": "tenant-a", "user_id": "user-a", "legal_entity_id": legal_entity}, "action": "GET", "resource": "/v1/compliance/data-designations"}
