@@ -114,7 +114,11 @@ func TestPostgres_OneTimePartyIsSealed(t *testing.T) {
 	if err := pool.QueryRow(context.Background(), `select coalesce(string_agg(payload::text, ' '), '') from outbox where aggregate_id = $1`, order.ID).Scan(&events); err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"Walk-in", "Hauptstr", "10115", "DE123456789"} {
+	party, err := json.Marshal(walkIn())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"Walk-in", "Hauptstr", `"10115"`, "DE123456789", string(party)} {
 		if strings.Contains(row, secret) || bytes.Contains(sealed, []byte(secret)) || strings.Contains(events, secret) {
 			t.Fatalf("%q is stored in clear: row %s events %s", secret, row, events)
 		}

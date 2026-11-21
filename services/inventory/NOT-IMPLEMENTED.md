@@ -680,7 +680,7 @@ DPT-1626 (wave 16 slice 26) adds the journal entry tools of PRD 3.16.13 and two 
 
 | # | Item | Status | Reason |
 |---|---|---|---|
-| - | Route row for `POST /v1/inventory/journals/{id}:copy` under duty `inventory.journal.write` | handoff - authz seed | No new duty. Add `{"resource": "/v1/inventory/journals/*:copy", "methods": ["POST"]}` to the `inventory.journal.write` permissions in `policies/authz/data.json`, next to `/v1/inventory/journals/*:reverse`; until then the policy denies the call for every caller (the unit tests pass the duty directly). The web BFF needs no change: it rewrites `/api/v1/inventory/...` for every path. |
+| - | Route row for `POST /v1/inventory/journals/{id}:copy` under duty `inventory.journal.write` | handoff - authz seed | No new duty. Add `{"resource": "/v1/inventory/journals/*:copy", "methods": ["POST"]}` to the `inventory.journal.write` permissions in `policies/authz/data.json`, next to `/v1/inventory/journals/*:reverse`; until then the policy denies the call for every caller (the unit tests pass the duty directly). The API gateway needs no change: it rewrites `/api/v1/inventory/...` for every path. |
 
 ## Handoffs from slice 27
 

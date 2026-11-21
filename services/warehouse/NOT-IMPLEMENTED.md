@@ -84,7 +84,7 @@ pages. Everything below is missing and is listed with its reason. Status is
 | OPA duty check beyond the local `X-Depot-Duties` header | handoff (platform kernel, wave 2) | `authz` uses the local `DutyPolicy` until the kernel swaps in OPA. Duties follow `<service>.<area>.<verb>`: `warehouse.setup.view` / `.setup.maintain` / `.work.supervise` / `.work.execute` / `.inquiry.view` / `.receipt.register` / `.shipment.confirm` are the PRD's WMS_SETUP_VIEW, WMS_SETUP_MAINTAIN, WMS_WORK_SUPERVISE, WMS_WORK_EXECUTE, WMS_INQUIRY, WMS_RECEIVE and WMS_SHIP_CONFIRM. The PRD gives dock appointments no duty of their own; an INBOUND booking needs the receive duty and an OUTBOUND one the ship-confirm duty. The segregation of duties in §6.31.17 (WMS_RECEIVE vs AP_INVOICE_APPROVE) is not enforced here. |
 | Warehouse id checked against the organization service (wave 6/8) | handoff (org) | Locations, directives, work, doors and receipts take any warehouse UUID; there is no org client or warehouse projection yet. The ASN's item ids and PO line references are not checked against product or purchasing either. |
 | Work number sequence WRK-* (wave 5) | handoff (numbering) | Work is identified by its UUID. |
-| Web BFF route `/api/v1/warehouse/*` → service `/v1/warehouse/*` | handoff (web BFF / deploy) | The web module calls `/api/v1/warehouse/...` like every module; the BFF and ingress routing live outside this wave's paths. |
+| API gateway route `/api/v1/warehouse/*` → service `/v1/warehouse/*` | handoff (API gateway / deploy) | The web module calls `/api/v1/warehouse/...` like every module; the gateway and ingress routing live outside this wave's paths. |
 
 ## Web (`apps/web/src/modules/warehouse`)
 

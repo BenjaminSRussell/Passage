@@ -335,7 +335,7 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | GET | `/v1/scheduling/parameters` (ETag; built-in defaults at version 1 until the first change) | `scheduling.read` |
 | PATCH | `/v1/scheduling/parameters` (Idempotency-Key, If-Match; 412 `SCHED-0140` when stale) | `scheduling.setup.write` |
 
-The browser reaches these as `/api/v1/scheduling/...` through the web BFF.
+The browser reaches these as `/api/v1/scheduling/...` through the API gateway.
 `api/openapi.yaml` is checked against the router by `internal/api/openapi_test.go`.
 
 ## Events (outbox, same transaction as the change)

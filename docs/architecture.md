@@ -330,7 +330,7 @@ flowchart TB
   subgraph EDGE["Edge and identity"]
     ENVOY["Envoy Gateway: TLS 1.3, JWT, rate limit, route-duty ext_authz"]
     KC["Keycloak: realm per tenant, OIDC, SAML, SCIM facade"]
-    BFF["web-bff, device-bff, portal-bff: session BFFs (web-bff hosts the GraphQL read gateway)"]
+    BFF["portal-bff as built; web-bff and device-bff are target only, not built (ADR-0009)"]
   end
 
   subgraph PLAT["Phases 0 and 1: platform context"]
@@ -499,8 +499,8 @@ Phase numbers follow the Document map (Phase 0 = waves 1–5 … Phase 9 = waves
 | `integration` (supporting) | 6, 9 / 35, 10, 49 | `depot_integration` (operational tables only) | none | `integration-ts` | none | Webhook subscriptions/deliveries, EDI/Peppol partner profiles and message log, API catalog, tenant egress relay, migration pipeline |
 | `analytics` (supporting) | 9 / 46 | `depot_analytics` (operational only) | none | `analytics-ts` | none | Semantic-layer API facade, dashboards, document designer, catalog/lineage |
 | `agents` (supporting) | 9 / 47 | `depot_agents` (operational only) | none | `agents-ts` (MCP gateway at `/v1/agents/mcp`, copilot API, runs, approvals) | `agents-py` (eval harness); `model-serving-py` in `services/agents-py/` (embedding, reranker, Presidio analyzer, anomaly scorer; wave 47) | Agent registry, prompt registry, runs, approvals, budgets, MCP server |
-| Edge: `web-bff` | 0 / 5 | none (sessions in `depot_platform`) | none | `web-bff` (`services/web-bff-ts`; renamed from `bff-ts`) | none | Cookie session BFF for the shell, GraphQL read gateway |
-| Edge: `device-bff` | 8 / 25 (first user), 32, 45 | none | none | `device-bff` (`services/device-bff-ts`) | none | Device enrollment, worker sessions, offline packets, command sync for shopfloor, warehouse-mobile and technician |
+| Edge: `web-bff` (*Target — not built, ADR-0009*) | 0 / 5 | none (sessions in `depot_platform`) | none | `web-bff` (`services/web-bff-ts`; renamed from `bff-ts`) | none | Cookie session BFF for the shell, GraphQL read gateway |
+| Edge: `device-bff` (*Target — not built, ADR-0009*) | 8 / 25 (first user), 32, 45 | none | none | `device-bff` (`services/device-bff-ts`) | none | Device enrollment, worker sessions, offline packets, command sync for shopfloor, warehouse-mobile and technician |
 | Edge: `portal-bff` | 3 / 20 (supplier), 30 (customer) | none | none | `portal-bff` (`services/portal-bff-ts`) | none | Session BFF and persisted-query GraphQL for the supplier and customer portals |
 
 *Designed counts, superseded by ADR-0008:* 15 bounded contexts (12 core + 3 supporting), 10 Go + 15 TS + 6 Python = **31 deployable images** (the original 27 + `manufacturing-ts` + `device-bff` + `portal-bff` + `model-serving-py`; `bff-ts` is `web-bff`). This is the one service inventory; frontend §2, AI §3 and events §9.0 reference it, with owning waves in the "Phase / waves" column. Each TS image has `api` and `worker` (Temporal) entrypoints deployed as separate Deployments from the same image.
@@ -527,7 +527,7 @@ There are no `/bff/...` routes for the web shell or devices (ADR-0009).
 
 | Layer | Path prefix | Served by | Rule |
 |---|---|---|---|
-| BFF | `/bff/...` (`/bff/login`, `/bff/callback`, `/bff/v1/me`, `/bff/v1/permissions`, `/bff/v1/stream`, `/bff/v1/search`; device: `/bff/v1/sync`, `/bff/v1/packets/{kind}`, `/bff/v1/device/*`) | `web-bff`, `device-bff`, `portal-bff` | Cookie session in, bearer token out; never forwarded to services |
+| BFF | `/bff/...` (`/bff/login`, `/bff/callback`, `/bff/v1/me`, `/bff/v1/permissions`, `/bff/v1/stream`, `/bff/v1/search`; device: `/bff/v1/sync`, `/bff/v1/packets/{kind}`, `/bff/v1/device/*`) | `portal-bff` as built (`customer-portal-ts`, `supplier-portal-ts`); `web-bff` and `device-bff` are *Target — not built* (ADR-0009) | Cookie session in, bearer token out; never forwarded to services |
 | Browser/PWA API | `/api/v1/<context>/...` | the BFF | The BFF rewrites `/api/v1/<context>/...` to `/v1/<context>/...` and attaches the bearer token. This records the resolution of the requirements' own `/api/v1` (engineering conventions) vs `/v1` (Appendix D.1) conflict |
 | Edge | `/v1/<context>/...` | Envoy Gateway to the owning service | TLS, JWT, rate limit, coarse route-duty only; also the surface for partners and agents |
 | Service | `/v1/<context>/<collection>` | owning deployable | Section 5; MCP at `/v1/agents/mcp`, copilot at `/v1/agents/copilot/conversations`, kill switch at `/v1/agents/definitions/{id}:disable` and `POST /v1/agents/kill-switch` |
@@ -584,7 +584,7 @@ Consistent with ADR-0001; "Rationale" is the reason this choice beats the altern
 | Object storage | S3-compatible with Object Lock (WORM) for fiscal documents, bucket per tenant, ClamAV scan | G.3, G.4. Product is Q13 | Filesystem PVs (no lock, no tenant isolation) |
 | Observability | OpenTelemetry SDKs → OTel Collector → Prometheus (metrics), Tempo (traces), Loki (logs), Grafana; Alertmanager | Mandated; vendor-neutral | Vendor APM (violates NFR-PT1) |
 | Analytics | Debezium CDC → Iceberg → Trino/ClickHouse, Cube semantic layer | ADR-0001; backend only exposes the `analytics` facade | n/a |
-| GraphQL | `web-bff` hosts a read-only GraphQL schema generated from entity metadata; resolvers call context REST APIs with the caller's token (DataLoader batching) so OPA and RLS apply downstream | No new datastore, one authorization path | Apollo Federation (a router plus a subgraph per context) |
+| GraphQL (*Target — not built, ADR-0009*) | `web-bff` hosts a read-only GraphQL schema generated from entity metadata; resolvers call context REST APIs with the caller's token (DataLoader batching) so OPA and RLS apply downstream | No new datastore, one authorization path | Apollo Federation (a router plus a subgraph per context) |
 | Testing | Defer strategy to `testing-architect`. Fixed by requirements: Go `rapid`, TS `fast-check`, Python `hypothesis`; Testcontainers; Pact between contexts; Playwright + axe; k6; Spectral + oasdiff in CI; golangci-lint, ESLint, Codacy | Appendix I | n/a |
 
 **As built (v1.0)**, row by row where the code differs:
@@ -639,7 +639,7 @@ Consistent with ADR-0001; "Rationale" is the reason this choice beats the altern
 | `User:<privilege>` | End-user (or delegated agent) bearer token from the tenant's Keycloak realm; Envoy checks token + route duty; the service re-verifies the JWT and asks OPA for `<privilege>` scoped to the resource's legal entity |
 | `Svc:<privilege>` | Client-credentials token of a service account (internal service, partner, device); same checks; no user subject |
 | `User\|Svc:<privilege>` | Either |
-| `Session` | Shell cookie session handled by the BFFs (`web-bff` for the shell; HttpOnly, Secure, SameSite=Strict, CSRF header); BFF forwards the user's access token upstream |
+| `Session` | Cookie session handled by the portal BFFs (shell: none, tokens in memory, ADR-0009; target `web-bff`, not built; HttpOnly, Secure, SameSite=Strict, CSRF header); BFF forwards the user's access token upstream |
 | `Sig:<scheme>` | Not a bearer endpoint: authenticated by HMAC (`X-Depot-Signature`), AS2/S-MIME certificate, or a single-use signed action token. OPA still evaluates the bound principal |
 | `None` | Cluster-internal listener only (separate port, not routed by the gateway) or pre-authentication redirect endpoint |
 
@@ -673,7 +673,7 @@ Privilege codes follow `<entity>.<action>` with action in `read | write | post |
 | POST | `/v1/{context}/{collection}:export` | Streams NDJSON/CSV with the list filter grammar; counts against concurrent-export quota | User:`{entity}.export` |
 | GET | `/v1/{context}/{collection}/{id}/{subresource}` | Composition sub-resources (e.g. `lines`) | User:`{entity}.read` |
 
-### 5.5 C. `platform` context (platform, platform-ts, web-bff)
+### 5.5 C. `platform` context (platform, platform-ts; web-bff is target, not built, ADR-0009)
 
 | Method | Path | Description | Auth Required |
 |---|---|---|---|
@@ -1240,7 +1240,7 @@ Generated CRUD covers projects, WBS, project resources, hour/expense/item journa
 
 ### 5.20 R. `device-bff` and per-context reconciliation endpoints
 
-`device-bff` (`services/device-bff-ts`, `/bff/...`, see the route table in Section 3.2) serves the offline packets and command replay for shopfloor, warehouse-mobile and technician. Reconciliation endpoints exist in every context that reconciles to the ledger.
+*Target — not built (ADR-0009): `device-bff` has no service directory; devices use `services/mobile` and `services/shopfloor`.* `device-bff` (`services/device-bff-ts`, `/bff/...`, see the route table in Section 3.2) was designed to serve the offline packets and command replay for shopfloor, warehouse-mobile and technician. Reconciliation endpoints exist in every context that reconciles to the ledger.
 
 | Method | Path | Description | Auth Required |
 |---|---|---|---|
@@ -5356,9 +5356,9 @@ flowchart LR
   PWAs -. import .-> PKG
 
   subgraph Edge["Envoy Gateway (TLS 1.3, JWT validation, rate limits, coarse route-duty check)"]
-    WBFF["web-bff<br/>services/web-bff-ts"]
-    DBFF["device-bff<br/>services/device-bff-ts"]
-    PBFF["portal-bff<br/>services/portal-bff-ts"]
+    WBFF["web-bff (target, not built, ADR-0009)<br/>services/web-bff-ts"]
+    DBFF["device-bff (target, not built, ADR-0009)<br/>services/device-bff-ts"]
+    PBFF["portal-bff (as built)<br/>services/portal-bff-ts"]
   end
 
   SHELL -- "cookie session<br/>/bff/* , /api/v1/*" --> WBFF
@@ -5414,9 +5414,9 @@ Each app is its own Vite build with its own service worker, manifest and nginx i
 
 | App | Path | Wave | Users | Form factor | BFF | Offline | Federation |
 |---|---|---|---|---|---|---|---|
-| Shop-floor kiosk | `apps/shopfloor` | 25 | Machine operators (shared device, badge sign-in) | Wall or arm-mounted touch tablet, 10–15" | device-bff | Yes. 30-minute tolerance target, queue survives reload (§7.6.1). | None (standalone) |
-| Warehouse mobile | `apps/warehouse-mobile` | 32 | Warehouse operators | Android rugged scanner (HID wedge plus camera), 4–6" | device-bff | Yes. 200-transaction offline sync target (§7.6.2). | None. Flows are metadata from the `warehouse` context. |
-| Technician | `apps/technician` | 45 | Field service technicians | Phone or tablet | device-bff | Yes. Work-order packet cached per day (§7.6.3). | None |
+| Shop-floor kiosk | `apps/shopfloor` | 25 | Machine operators (shared device, badge sign-in) | Wall or arm-mounted touch tablet, 10–15" | device-bff (*Target — not built*) | Yes. 30-minute tolerance target, queue survives reload (§7.6.1). | None (standalone) |
+| Warehouse mobile | `apps/warehouse-mobile` | 32 | Warehouse operators | Android rugged scanner (HID wedge plus camera), 4–6" | device-bff (*Target — not built*) | Yes. 200-transaction offline sync target (§7.6.2). | None. Flows are metadata from the `warehouse` context. |
+| Technician | `apps/technician` | 45 | Field service technicians | Phone or tablet | device-bff (*Target — not built*) | Yes. Work-order packet cached per day (§7.6.3). | None |
 | Supplier portal | `apps/supplier-portal` | 20 (extended 35) | External vendor users | Responsive web | portal-bff | No (online only; installable) | None |
 | Customer portal | `apps/customer-portal` | 30 | External customer users | Responsive web | portal-bff | No (online only; installable) | None |
 
@@ -5428,8 +5428,8 @@ The requirements sanction TypeScript BFFs (ADR-0001). The frontend relies on the
 
 | BFF | Serves | Frontend-facing endpoints | Upstream |
 |---|---|---|---|
-| `web-bff` (`services/web-bff-ts`) | `apps/web` | `/bff/login`, `/bff/callback`, `/bff/logout`, `/bff/backchannel-logout`, `GET /bff/v1/me`, `GET /bff/v1/permissions?le=`, `GET /bff/v1/stream` (SSE), `GET /bff/v1/search?q=`, `/api/v1/*` (token relay pass-through) | Keycloak, OPA, Envoy Gateway → services |
-| `device-bff` (`services/device-bff-ts`) | shopfloor, warehouse-mobile, technician | Same session endpoints, plus `POST /bff/v1/device/enroll`, `POST /bff/v1/device/worker-session` (badge + PIN), `POST /bff/v1/sync` (ordered replay of queued commands), `GET /bff/v1/packets/:kind` (offline packets) | Keycloak, OPA, services. Envoy `device` rate class (120 req/min/device, D.7). |
+| `web-bff` (`services/web-bff-ts`), *Target — not built, ADR-0009* | `apps/web` | `/bff/login`, `/bff/callback`, `/bff/logout`, `/bff/backchannel-logout`, `GET /bff/v1/me`, `GET /bff/v1/permissions?le=`, `GET /bff/v1/stream` (SSE), `GET /bff/v1/search?q=`, `/api/v1/*` (token relay pass-through) | Keycloak, OPA, Envoy Gateway → services |
+| `device-bff` (`services/device-bff-ts`), *Target — not built, ADR-0009* | shopfloor, warehouse-mobile, technician | Same session endpoints, plus `POST /bff/v1/device/enroll`, `POST /bff/v1/device/worker-session` (badge + PIN), `POST /bff/v1/sync` (ordered replay of queued commands), `GET /bff/v1/packets/:kind` (offline packets) | Keycloak, OPA, services. Envoy `device` rate class (120 req/min/device, D.7). |
 | `portal-bff` (`services/portal-bff-ts`) | supplier and customer portals | Same session endpoints, `/graphql` (persisted queries only), selected `/api/v1/*` mutations | Keycloak, OPA, GraphQL read model, services |
 
 All browser traffic is same-origin with the serving app's host. The BFF is the only component that attaches `Authorization: Bearer`. Envoy still validates that JWT on every request (§8.3), so a compromised BFF cannot skip gateway checks.
@@ -5758,12 +5758,12 @@ Versions are pinned to the exact patch in the lockfile at wave 5. The version li
 | 3 | `react-router-dom` | 6.x (data router, `RouteObject`) | singleton, eager | Binding (react-router) | Routing |
 | 4 | `@tanstack/react-query` | 5.x | singleton (one `QueryClient`) | Binding | Server state |
 | 5 | `zod` | 3.x | singleton | Binding | Schemas: metadata → zod, API responses |
-| 6 | `@depot/ui` | workspace | singleton, eager | Proposed (wave 5) | Design system |
-| 7 | `@depot/forms` | workspace | singleton | Proposed | Form system |
+| 6 | `@depot/ui` | workspace | singleton, eager | Target — not built (wave 5) | Design system |
+| 7 | `@depot/forms` | workspace | singleton | Target — not built | Form system |
 | 8 | `@depot/api-client` | workspace (generated) | singleton | Requirement D.9 (first-party TS SDK) | API calls |
-| 9 | `@depot/session` | workspace | singleton | Proposed | Session and permissions |
-| 10 | `@depot/i18n` | workspace | singleton | Proposed | Translation and formatting |
-| 11 | `@depot/telemetry` | workspace | singleton | Proposed | Tracing context |
+| 9 | `@depot/session` | workspace | singleton | Target — not built | Session and permissions |
+| 10 | `@depot/i18n` | workspace | singleton | Target — not built | Translation and formatting |
+| 11 | `@depot/telemetry` | workspace | singleton | Target — not built | Tracing context |
 | 12 | `i18next` + `react-i18next` | 23.x / 14.x | singleton | Needs (wave 5) | i18n for 7 country packs and bilingual EN/FR (H) |
 | 13 | `react-aria-components` | 1.x | singleton | Needs (wave 5) | Accessible combobox, grid, dialog, menu and date primitives under `@depot/ui` |
 | 14 | `@tanstack/react-table` + `@tanstack/react-virtual` | 8.x / 3.x | singleton | Needs (wave 5) | Headless grid model and virtualization for EntityGrid and LineGrid |
@@ -5927,7 +5927,7 @@ There are no separate list or detail routes per entity outside this generator.
 
 *Target — not built (see backlog, D29):* there is no `web-bff` and no generic stream; server-sent events exist only in `agents-ts`, `fieldservice`, `mobile` and `shopfloor`.
 
-`web-bff` exposes `GET /bff/v1/stream` as Server-Sent Events. It uses the session cookie and is scoped to the user. The channel carries:
+*Target — not built, ADR-0009*: `web-bff` would expose `GET /bff/v1/stream` as Server-Sent Events. It uses the session cookie and is scoped to the user. The channel carries:
 
 - `job.progress` (Temporal workflow progress and ETA)
 - `task.created` / `task.completed` (inbox counts)
@@ -6056,7 +6056,7 @@ interface QueuedCommand {
 
 **Replay.**
 - Order is FIFO per `aggregateKey`; independent aggregates are parallel, at most 4 in flight.
-- Replay goes to `device-bff POST /bff/v1/sync` in batches of up to 50.
+- Replay goes to `device-bff POST /bff/v1/sync` (*Target — not built, ADR-0009*) in batches of up to 50.
 - The BFF replays each command to the service with `Idempotency-Key = id`, so re-sending is safe by construction (D.5). `Idempotent-Replayed: true` counts as done.
 
 **Outcome handling.**
@@ -6151,9 +6151,9 @@ These are installable, but writes are online-only. When offline, the shell shows
 
 | Client | Type | Used by | Flow | Notes |
 |---|---|---|---|---|
-| `depot-web` | Confidential (secret held only by web-bff, in Vault, rotated per release, E.7) | web-bff for `apps/web` | Authorization Code + PKCE (S256) | Redirect URI `https://<app-host>/bff/callback` only |
-| `depot-device` | Confidential (device-bff) | warehouse-mobile, technician | Authorization Code + PKCE | Same pattern as web; shift-length session |
-| `depot-kiosk-<deviceId>` | Confidential, one per enrolled kiosk, created at enrollment | device-bff on behalf of a kiosk | Client credentials for the **device** identity; worker identity via token exchange (§8.6) | Revocable per device |
+| `depot-web` | Confidential (secret held only by web-bff, in Vault, rotated per release, E.7) (*Target — not built, ADR-0009*; `apps/web` is a public client) | web-bff for `apps/web` | Authorization Code + PKCE (S256) | Redirect URI `https://<app-host>/bff/callback` only |
+| `depot-device` | Confidential (device-bff, *Target — not built, ADR-0009*) | warehouse-mobile, technician | Authorization Code + PKCE | Same pattern as web; shift-length session |
+| `depot-kiosk-<deviceId>` | Confidential, one per enrolled kiosk, created at enrollment | device-bff on behalf of a kiosk (*Target — not built, ADR-0009*) | Client credentials for the **device** identity; worker identity via token exchange (§8.6) | Revocable per device |
 | `depot-portal-supplier`, `depot-portal-customer` | Confidential (portal-bff) | Portals | Authorization Code + PKCE | External users in the tenant realm with portal roles. Users are linked to `party_id` through a user attribute. |
 | `depot-api` | Bearer-only audience | Services, Envoy | n/a | An audience mapper adds `aud: depot-api` to access tokens issued to the clients above |
 
@@ -6175,7 +6175,7 @@ These are installable, but writes are online-only. When offline, the shell shows
 ```mermaid
 sequenceDiagram
   participant B as Browser (shell)
-  participant F as web-bff
+  participant F as web-bff (target, not built)
   participant K as Keycloak (tenant realm)
   participant E as Envoy Gateway
   participant S as Service
@@ -6271,6 +6271,8 @@ The last-known set is never used to show more than the empty set after its TTL.
 - **Device apps.** Session length is one shift: 12 h absolute for warehouse-mobile and technician, with an idle lock after 15 minutes that requires re-authentication by badge, PIN or biometric (shared rugged devices and cached P2 data); the shift-length refresh is retained. The kiosk worker session is per interaction (§8.6).
 
 ### 8.6 Device and kiosk identity
+
+*Target — not built (ADR-0009): `device-bff` has no service directory; the steps below describe the target design.*
 
 1. **Enrollment.** A supervisor holding the `EnrollDevices` duty opens `apps/shopfloor/enroll` and authenticates. `device-bff` creates a per-device Keycloak client (`depot-kiosk-<deviceId>`) bound to a resource or work centre. It stores the client secret server-side and sets a long-lived, `HttpOnly` device cookie (`__Host-depot_device`, `SameSite=Strict`, 90-day rotation). The kiosk never sees the secret. Revoking the client disables the device.
 2. **Worker sign-in.** A badge scan plus a PIN of at least 4 digits goes to `POST /bff/v1/device/worker-session`. `device-bff` verifies the badge and PIN against the worker's credential in Keycloak (Q13). It then obtains a **user** access token for that worker through Keycloak token exchange (RFC 8693, device client → worker subject), scoped to the `ReportProduction` and time-registration duties. All API calls carry the worker's identity, so `actor = user:<sub>` in events and audit.
@@ -6382,13 +6384,13 @@ Each fallback shows the `traceId` from the problem details or the active OTel sp
 | Shell first contentful paint (warm) | < 1.5 s, mid-range laptop | NFR-P11 | Lighthouse CI on every merge to `main` |
 | Shell LCP | < 2.5 s | House standard | Lighthouse CI; web-vitals telemetry p75 |
 | INP | < 200 ms p75 | House standard | web-vitals telemetry |
-| Shell initial JS (React, router, query, `@depot/ui` core, shell) | ≤ 220 KB gzip | Proposed | Bundle-size check in CI (fails over budget) |
-| Per remote entry + first route chunk | ≤ 120 KB gzip | Proposed | Same |
-| `@depot/forms` (lazy on first entity page) | ≤ 150 KB gzip | Proposed | Same |
-| PWA initial JS | ≤ 250 KB gzip; app shell precached | Proposed | Same |
+| Shell initial JS (React, router, query, `@depot/ui` core, shell) | ≤ 220 KB gzip | Target — not built | Bundle-size check in CI (fails over budget) |
+| Per remote entry + first route chunk | ≤ 120 KB gzip | Target — not built | Same |
+| `@depot/forms` (lazy on first entity page) | ≤ 150 KB gzip | Target — not built | Same |
+| PWA initial JS | ≤ 250 KB gzip; app shell precached | Target — not built | Same |
 | Scan-to-acknowledge (PWAs) | ≤ 300 ms | I.1 | Playwright timing on emulated device |
 | Generated read through the BFF | p95 < 50 ms service time (NFR-P2) + BFF overhead ≤ 10 ms p95 | NFR-P2 | k6 smoke via BFF |
-| Lookup type-ahead | Results ≤ 300 ms after debounce, p95 | Proposed | E2E timing |
+| Lookup type-ahead | Results ≤ 300 ms after debounce, p95 | Target — not built | E2E timing |
 
 Techniques:
 
@@ -6441,7 +6443,7 @@ The strategy is deferred to `testing-architect`. The gates this architecture dep
 | Q4 | Confirm the shapes and versioning of the metadata registry endpoints for form definitions, message catalog and saved views (§3.3); paths settled to the backend names (`/v1/platform/message-catalog`, form definitions by `{id}`). | backend-architect | Waves 3, 5 |
 | Q5 | Email, Slack and Teams approval delivery (U8): which wave owns the notification channels, and is one-tap approve a signed short-lived link or a full sign-in? | backend-architect / security | Wave 4 |
 | Q6 | LE scoping header `Depot-Legal-Entity` and its narrowing semantics at the gateway and services. Resolved: the header is part of the backend contract (§7.3); it narrows the token's legal-entity scopes and never widens. *As built:* it narrows nothing (D33); the multi-entity model in backend §7.3 is Proposed, pending owner confirmation. | backend-architect | Wave 2 |
-| Q7 | SSE bridge (Kafka and Temporal → web-bff) for live updates: is it acceptable in the BFF, and what are its scaling limits at 10k concurrent users? | backend-architect | Wave 5 (U4) |
+| Q7 | SSE bridge (Kafka and Temporal → web-bff, target, not built, ADR-0009) for live updates: is it acceptable in the BFF, and what are its scaling limits at 10k concurrent users? | backend-architect | Wave 5 (U4) |
 | Q8 | BFF session store placement: a BFF-owned Postgres database (proposed) or another store. Must be in-stack (no managed services). | backend-architect | Wave 2 |
 | Q9 | Tenant host scheme (`<tenant>.app.<env>.depot.dev`?) and Keycloak host on the same registrable domain. | platform / SRE | Wave 2 |
 | Q10 | Add the `ui_privileges` Rego rule (one batch decision per user and LE) to the platform policy bundle. | backend-architect / security | Wave 2 |

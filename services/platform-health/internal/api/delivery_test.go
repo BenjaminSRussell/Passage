@@ -33,7 +33,7 @@ func TestDeliveryFilesCarryRequiredContent(t *testing.T) {
 		{"services/platform-health/Dockerfile", []string{"USER 65532:65532"}},
 		{"deploy/Makefile", []string{"deploy-local:", "tofu", "k3d image import", "root-local.yaml"}},
 		{"deploy/tofu/cluster/main.tf", []string{"precondition", `helm_release" "argocd"`, `helm_release" "cert_manager"`}},
-		{"services/platform-health/NOT-IMPLEMENTED.md", []string{"Deliverable 1", "slice 2 of DPT-1", "Root `make deploy-local`"}},
+		{"services/platform-health/NOT-IMPLEMENTED.md", []string{"Deliverable 1", "built (Kyverno)", "Root `make deploy-local`"}},
 		{"services/platform-health/charts/hello-ledger/templates/deployment.yaml", []string{"secretKeyRef", "/healthz", "/readyz"}},
 		{".github/workflows/gate.yml", []string{"gate:", "if: always()", "dorny/paths-filter"}},
 		{".github/workflows/ci.yml", []string{"cosign sign", "cosign attest", "anchore/sbom-action", "anchore/scan-action", "aquasecurity/trivy-action"}},

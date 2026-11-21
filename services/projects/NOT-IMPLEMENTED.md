@@ -135,7 +135,7 @@ owner or a kernel change; see the reason).
 | `/metrics` on the admin port (9090) | later slice of DPT-41 | The chart declares the admin port and an optional ServiceMonitor (off by default), but the binary serves no metrics yet. |
 | `DATABASE_URL_FILE`, OTel, Kafka, OPA sidecar configuration | handoff (platform kernel, deploy) | The entrypoint reads `DATABASE_URL` and `HTTP_ADDR` only. |
 | Gateway duty checks via OPA (`x-depot-duty` enforcement at the edge) | handoff (edge-identity) | This service checks duties in-process through `authz.RequireDuty`. |
-| BFF rewrite of `/api/v1/projects/*` to `/v1/projects/*` | handoff (web-bff) | Browser module calls `/api/v1/projects`; the rewrite lives in the BFF. |
+| Gateway rewrite of `/api/v1/projects/*` to `/v1/projects/*` | handoff (gateway) | Browser module calls `/api/v1/projects`; the rewrite lives in the API gateway (no web BFF, ADR-0009). |
 | Argo CD application, image digest, ES-US demo data | handoff (deploy) | Outside this wave's owned paths. |
 
 ## Web screens (PRD §8.41.6) not built yet

@@ -138,7 +138,7 @@ transport.gate.operate also guards the gate log reads: the visits carry driver n
 the `gate.checkedin` event carry no driver PII; the application role may only insert and
 read `gate_event`, and a trigger refuses updates and deletes.
 
-Browser paths are `/api/v1/transport/...`, rewritten by the web BFF to `/v1/transport/...`
+Browser paths are `/api/v1/transport/...`, rewritten by the API gateway to `/v1/transport/...`
 like every other service. The PRD writes the paths as `/tms/v1/...`; the route names after
 the prefix follow the PRD.
 

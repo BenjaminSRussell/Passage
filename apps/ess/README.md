@@ -29,4 +29,4 @@ require the HR workspace duties, and an accessible layout that works at 360 px
 width (PRD 8.42.6).
 
 Consumes `services/hr/api/openapi.yaml`. The browser uses `/api/v1/hr/...`,
-which the web BFF rewrites to the HR service.
+which the API gateway rewrites to the HR service.

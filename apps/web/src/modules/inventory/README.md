@@ -1,7 +1,7 @@
 # Inventory module (web)
 
 Wave 16 slice 1 to 7 screens for `services/inventory` (`/api/v1/inventory/...`, rewritten by the
-web BFF to the service's `/v1/inventory/...`). Built from the shell primitives in
+API gateway to the service's `/v1/inventory/...`). Built from the shell primitives in
 `src/shell/ui` and `pages.module.css`, following `apps/web/docs/design-system.md`.
 
 | Route | Screen | Duty |

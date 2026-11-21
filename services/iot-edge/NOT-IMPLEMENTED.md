@@ -30,7 +30,7 @@ as JSON and published.
 | Edge certificate expiry alert SF-0018 and rollback alert SF-0019 | later slice of DPT-25 | The decisions are built (`DecideCert` and `RollbackDue`). Raising the alerts belongs to the shopfloor service and the rollout job, which do not exist yet. |
 | Sequence gap replay from the buffer by seq range (runbook "seq gap") | later slice of DPT-25 | The gap is reported by `Sequencer.Accept`. Replay needs the SQLite store and the ingest path. |
 | Process message readback deviation (BR-25.15) | later slice of DPT-25 | The decision (`ReadbackMatches`) and category `deviation` are built. Raising the process message needs write-back (above) and the shopfloor process-message path. |
-| `EdgeWriteAudit` table and the OPC-UA server trust list (FR-25.19 data model) | later slice of DPT-25 | `EdgeNode` and `EdgeConfigVersion` with the publish, pull and heartbeat endpoints exist in the shopfloor service since slice 14; the audit and trust list do not. `NextApplied` is the rule the applied-version column will enforce. |
+| `EdgeWriteAudit` table and the OPC-UA server trust list: Edge connector as a deployable (FR-25.19 data model) | later slice of DPT-25 | `EdgeNode` and `EdgeConfigVersion` with the publish, pull and heartbeat endpoints exist in the shopfloor service since slice 14; the audit and trust list do not. `NextApplied` is the rule the applied-version column will enforce. |
 | Edge fleet screens: write audit | later slice of DPT-25 | Nodes, configuration versions and rings have screens since slice 14 (`/shopfloor/edge-nodes`); the write audit needs `EdgeWriteAudit`. |
 | Edge buffer hours setting (1–168 h per edge node) | later slice of DPT-25 | The ring is fixed at 24 h until the setting comes with the config document. |
 

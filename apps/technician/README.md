@@ -7,7 +7,7 @@ the web checks (`npx vitest run src/modules/technician`). The web app also serve
 
 ```
 npm install
-npm run dev        # http://localhost:5173, API calls need the web BFF in front (see apps/web)
+npm run dev        # http://localhost:5173, API calls need the gateway in front (see apps/web)
 npm run build      # tsc --noEmit && vite build
 ```
 
@@ -32,6 +32,6 @@ npm run build      # tsc --noEmit && vite build
 
 - Sign-in: the app sends the browser's session like the web shell; the technician's token must carry the
   worker id as the user id (`service_technician.worker_id`), see `services/fieldservice/NOT-IMPLEMENTED.md`.
-- The web BFF must route `/api/v1/service/...` and `/api/v1/inventory/truck-stock-levels` (same rules as the web app).
+- The gateway must route `/api/v1/service/...` and `/api/v1/inventory/truck-stock-levels` (same rules as the web app).
 - Not built: push of published routes (the app polls every minute and on reconnect), live position tracking,
   PWA icons, a Playwright offline run against real devices (hardware is out of scope).
