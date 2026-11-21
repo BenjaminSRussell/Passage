@@ -33,6 +33,7 @@ export interface Config {
   runTokenCap: number;
   copilotTokenCap: number;
   copilotMaxTurns: number;
+  taskConnectTimeoutMs: number;
   outputGuardTimeoutMs: number;
   needToKnowCacheMs: number;
   selfApprovalLimit: { amount: string; currency: string };
@@ -188,6 +189,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     throw new Error("AGENTS_OUTPUT_GUARD_TIMEOUT_MS must be 100 to 10000");
   const needToKnowCacheMs = positiveInt(env, "AGENTS_NEED_TO_KNOW_CACHE_MS", 10_000);
   if (needToKnowCacheMs > 60_000) throw new Error("AGENTS_NEED_TO_KNOW_CACHE_MS must be 1 to 60000");
+  const taskConnectTimeoutMs = positiveInt(env, "AGENTS_TASK_CONNECT_TIMEOUT_MS", 2000);
+  if (taskConnectTimeoutMs < 100 || taskConnectTimeoutMs > 10_000)
+    throw new Error("AGENTS_TASK_CONNECT_TIMEOUT_MS must be 100 to 10000");
   const issuer = env["AGENTS_JWT_ISSUER"] ?? "";
   if (!/^https?:\/\//.test(issuer))
     throw new Error(
@@ -242,6 +246,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     runTokenCap: positiveInt(env, "AGENTS_RUN_TOKEN_CAP", 20_000),
     copilotTokenCap: positiveInt(env, "AGENTS_COPILOT_TOKEN_CAP", 8_000),
     copilotMaxTurns: positiveInt(env, "AGENTS_COPILOT_MAX_TURNS", 8),
+    taskConnectTimeoutMs,
     outputGuardTimeoutMs,
     needToKnowCacheMs,
     selfApprovalLimit: { amount: limit, currency },

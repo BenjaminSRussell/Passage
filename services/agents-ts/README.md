@@ -70,6 +70,7 @@ There is no web BFF (ADR-0009): the shell reaches `/api/v1/agents/**`, copilot c
 | `AGENTS_MODEL`, `AGENTS_COPILOT_MODEL`, `AGENTS_MODEL_OVERRIDES` | Model ids; the overrides are a JSON object of agent id to model id | `claude-sonnet-5-5` |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` + `AGENTS_OPENAI_BASE_URL`, `AWS_REGION` + `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | Provider credentials, from a secret; a missing one fails the first run naming the variable | |
 | `AGENTS_RUN_TOKEN_CAP`, `AGENTS_COPILOT_TOKEN_CAP`, `AGENTS_COPILOT_MAX_TURNS` | Per-run and per-chat token caps, chat turns | 20000, 8000, 8 |
+| `AGENTS_TASK_CONNECT_TIMEOUT_MS` | How long `mode=task` waits for the MCP gateway session before answering from the catalog with no tool, 100 to 10000 | 2000 |
 | `AGENTS_OUTPUT_GUARD_TIMEOUT_MS` | Deadline of the output guard on one answer or sentence, 100 to 10000; a miss withholds the answer (`AGT-0220`) | 2000 |
 | `AGENTS_NEED_TO_KNOW_CACHE_MS` | How long the need-to-know switch read from the compliance service is reused, 1 to 60000; an answer built from CUI records is never cached | 10000 |
 | `AGENTS_RUN_ENGINE`, `AGENTS_WORKFLOW_URL`, `DEPOT_SERVICE_PUBLIC_KEYS` | `inprocess` (dev fallback: a run is one promise in the pod) or `temporal` (each run is workflow-ts `agentRunWorkflow`, so a run resumes after an approval across pod restarts; needs the workflow URL and workflow-ts's public key, see "Runs as workflows") | `inprocess` |
@@ -133,6 +134,10 @@ npm test          # vitest: engine, domain and redaction tests
 npm run typecheck
 npm run build
 ```
+
+Task-mode drafts derived from help chunks are untrusted model output: the route comes only from the catalog and every param and draft field is validated against the catalog's declared fields before a navigation intent is returned.
+
+After changing a prompt (for example the task-mode instruction in `src/domain/routeCatalog.ts`), re-record the red-team replay with `REDTEAM_RECORD=1 npm run redteam` (see `evals/README.md`); a missing or stale row fails with MISSING or STALE. When apps/web modules legitimately shrink, refresh `test/fixtures/web-modules-snapshot.json` (the route catalog drift test says how).
 
 Postgres-backed tests (`approvals-pg`, `budget-store`) run when `DEPOT_TEST_DATABASE_URL` (owner) and `DEPOT_TEST_APP_DATABASE_URL` (`depot_app`) are set, as in CI; without them they are skipped.
 
