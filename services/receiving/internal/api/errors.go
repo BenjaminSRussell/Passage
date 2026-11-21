@@ -33,6 +33,8 @@ var domainStatus = map[string]int{
 	domain.CodeAuditBlocked:              http.StatusConflict,
 	domain.CodeNotAuditBlocked:           http.StatusConflict,
 	domain.CodeAuditSelfRelease:          http.StatusForbidden,
+	domain.CodeExceptionNotOpen:          http.StatusConflict,
+	domain.CodeExceptionNotAssignee:      http.StatusForbidden,
 	domain.CodeInvalidBank:               http.StatusUnprocessableEntity,
 	domain.CodeInvalidCapture:            http.StatusUnprocessableEntity,
 	domain.CodeSheetOverLine:             http.StatusUnprocessableEntity,

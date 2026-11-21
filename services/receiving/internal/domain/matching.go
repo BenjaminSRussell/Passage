@@ -155,10 +155,14 @@ func evaluateLine(p Policy, currency string, l InvoiceLine) LineResult {
 }
 
 func Evaluate(p Policy, in Invoice) Result {
+	return EvaluateWith(p, func(int) Policy { return p }, in)
+}
+
+func EvaluateWith(p Policy, linePolicy func(lineIdx int) Policy, in Invoice) Result {
 	res := Result{Status: Matched, Lines: make([]LineResult, 0, len(in.Lines))}
 	sum := decimal.Zero
-	for _, l := range in.Lines {
-		lr := evaluateLine(p, in.Currency, l)
+	for i, l := range in.Lines {
+		lr := evaluateLine(linePolicy(i), in.Currency, l)
 		res.Lines = append(res.Lines, lr)
 		res.Status = worse(res.Status, lr.Status)
 		sum = sum.Add(l.Qty.Mul(l.UnitPrice))

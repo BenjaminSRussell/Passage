@@ -106,6 +106,8 @@ type API struct {
 	asnsCreated        atomic.Int64
 	submissionsCreated atomic.Int64
 	asnReceipts        atomic.Int64
+	exceptionsOpened   atomic.Int64
+	exceptionsApproved atomic.Int64
 
 	pendingPostings pendingTracker
 	http            requestMetrics
@@ -186,6 +188,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyErsPriceConfirm)).Put("/v1/receiving/receipts/{id}/lines/{lineNo}/ers-price-confirmation", a.confirmErsPrice)
 	r.With(authz.RequireDuty(dutyMatchingPolicy)).Put("/v1/receiving/audit-policy", a.setAuditPolicy)
 	r.With(authz.RequireDuty(dutyMatchingPolicy)).Put("/v1/receiving/ers-vendors/{vendorId}", a.setErsVendor)
+	r.With(authz.RequireDuty(dutyMatchingPolicy)).Put("/v1/receiving/matching-policies", a.setMatchingPolicy)
+	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/invoice-exceptions", a.listExceptions)
+	r.With(authz.RequireDuty(dutyInvoiceAuditRelease)).Post("/v1/receiving/invoice-exceptions/{id}:approve", a.idempotent(a.approveException))
 }
 
 func (a *API) Metrics() http.Handler {
@@ -219,6 +224,8 @@ func (a *API) Metrics() http.Handler {
 		{"receiving_asns_created_total", "Advance ship notices created against purchase orders.", &a.asnsCreated},
 		{"receiving_asn_receipts_started_total", "Receipts started from an advance ship notice.", &a.asnReceipts},
 		{"receiving_invoices_audit_rejected_total", "Audit-blocked invoices rejected by an auditor, freeing their GR/IR quantity.", &a.auditRejected},
+		{"receiving_invoice_exceptions_opened_total", "Invoices held because a variance exceeded a stored matching policy.", &a.exceptionsOpened},
+		{"receiving_invoice_exceptions_approved_total", "Invoice exceptions approved with a reason by the policy owner and posted.", &a.exceptionsApproved},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")

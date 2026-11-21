@@ -28,7 +28,15 @@ func (s *Store) InvoiceVendor(ctx context.Context, id string) (vendorID string, 
 	return vendorID, err
 }
 
-func (s *Store) ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn store.ReleaseFunc) (out store.Invoice, err error) {
+func (s *Store) ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn store.ReleaseFunc) (store.Invoice, error) {
+	return s.release(ctx, id, legalEntityID, by, "", false, fn)
+}
+
+func (s *Store) ApproveException(ctx context.Context, id, legalEntityID, by, reason string, fn store.ReleaseFunc) (store.Invoice, error) {
+	return s.release(ctx, id, legalEntityID, by, reason, true, fn)
+}
+
+func (s *Store) release(ctx context.Context, id, legalEntityID, by, reason string, assigneeOnly bool, fn store.ReleaseFunc) (out store.Invoice, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
 		canonical, valid := ids.Canonical(id)
 		inv, ok := t.invoiceDocs[canonical]
@@ -36,6 +44,11 @@ func (s *Store) ReleaseInvoice(ctx context.Context, id, legalEntityID, by string
 			return store.ErrInvoiceNotFound
 		}
 		id = canonical
+		if assigneeOnly {
+			if err := checkAssignee(t, id, by); err != nil {
+				return err
+			}
+		}
 		if err := store.CheckRelease(inv, legalEntityID, by); err != nil {
 			return err
 		}
@@ -52,6 +65,7 @@ func (s *Store) ReleaseInvoice(ctx context.Context, id, legalEntityID, by string
 		}
 		now := time.Now().UTC()
 		inv.LedgerEntryID, inv.Status, inv.ReleasedBy, inv.ReleasedAt = outcome.LedgerEntryID, domain.InvoiceStatusPosted, by, &now
+		closeException(t, id, domain.ExceptionApproved, by, reason)
 		t.invoiceDocs[id] = inv
 		s.events = append(s.events, outcome.Event)
 		out = inv
@@ -91,6 +105,7 @@ func (s *Store) RejectInvoice(ctx context.Context, id, legalEntityID, by, reason
 		}
 		now := time.Now().UTC()
 		inv.Status, inv.RejectedBy, inv.RejectedAt, inv.RejectReason = domain.InvoiceStatusAuditRejected, by, &now, reason
+		closeException(t, id, domain.ExceptionRejected, by, reason)
 		t.invoiceDocs[id] = inv
 		s.events = append(s.events, evt)
 		out = inv

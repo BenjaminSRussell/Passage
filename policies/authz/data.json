@@ -803,7 +803,8 @@
     "receiving.matching-policy.maintain": {"permissions": [
       {"resource": "/v1/receiving/matching:evaluate", "methods": ["POST"]},
       {"resource": "/v1/receiving/audit-policy", "methods": ["PUT"]},
-      {"resource": "/v1/receiving/ers-vendors/*", "methods": ["PUT"]}
+      {"resource": "/v1/receiving/ers-vendors/*", "methods": ["PUT"]},
+      {"resource": "/v1/receiving/matching-policies", "methods": ["PUT"]}
     ]},
     "receiving.receipt.maintain": {"permissions": [
       {"resource": "/v1/audit/records/*/*", "methods": ["GET"]},
@@ -831,7 +832,8 @@
     ]},
     "receiving.invoice-audit.release": {"permissions": [
       {"resource": "/v1/receiving/invoices/*:release-audit-block", "methods": ["POST"]},
-      {"resource": "/v1/receiving/invoices/*:reject-audit-block", "methods": ["POST"]}
+      {"resource": "/v1/receiving/invoices/*:reject-audit-block", "methods": ["POST"]},
+      {"resource": "/v1/receiving/invoice-exceptions/*:approve", "methods": ["POST"]}
     ]},
     "receiving.service-entry.maintain": {"permissions": [
       {"resource": "/v1/receiving/service-entry-sheets", "methods": ["POST"]},
@@ -881,7 +883,8 @@
       {"resource": "/v1/receiving/invoice-captures/*", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-submissions", "methods": ["GET"]},
       {"resource": "/v1/receiving/invoice-submissions/*", "methods": ["GET"]},
-      {"resource": "/v1/receiving/ers-self-bills/*", "methods": ["GET"]}
+      {"resource": "/v1/receiving/ers-self-bills/*", "methods": ["GET"]},
+      {"resource": "/v1/receiving/invoice-exceptions", "methods": ["GET"]}
     ]},
     "receiving.admin": {"permissions": [
       {"resource": "/v1/receiving/pending-postings", "methods": ["GET"]},

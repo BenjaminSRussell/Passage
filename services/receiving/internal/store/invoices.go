@@ -97,6 +97,11 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 		if err := insertInvoice(ctx, tx, tenantID, &in); err != nil {
 			return err
 		}
+		if outcome.Blocked && outcome.Exception != nil {
+			if err := insertException(ctx, tx, tenantID, in, *outcome.Exception); err != nil {
+				return err
+			}
+		}
 		var grirRows [][]any
 		for _, key := range distinct {
 			item := byKey[key]

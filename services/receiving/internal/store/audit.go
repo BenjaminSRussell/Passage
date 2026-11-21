@@ -80,6 +80,14 @@ func (s *Postgres) InvoiceVendor(ctx context.Context, id string) (string, error)
 }
 
 func (s *Postgres) ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn ReleaseFunc) (Invoice, error) {
+	return s.release(ctx, id, legalEntityID, by, "", false, fn)
+}
+
+func (s *Postgres) ApproveException(ctx context.Context, id, legalEntityID, by, reason string, fn ReleaseFunc) (Invoice, error) {
+	return s.release(ctx, id, legalEntityID, by, reason, true, fn)
+}
+
+func (s *Postgres) release(ctx context.Context, id, legalEntityID, by, reason string, assigneeOnly bool, fn ReleaseFunc) (Invoice, error) {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return Invoice{}, err
@@ -103,6 +111,11 @@ func (s *Postgres) ReleaseInvoice(ctx context.Context, id, legalEntityID, by str
 		if err != nil {
 			return err
 		}
+		if assigneeOnly {
+			if err := checkAssignee(ctx, tx, tenantID, id, by); err != nil {
+				return err
+			}
+		}
 		if err := CheckRelease(inv, legalEntityID, by); err != nil {
 			return err
 		}
@@ -117,6 +130,9 @@ func (s *Postgres) ReleaseInvoice(ctx context.Context, id, legalEntityID, by str
 		if err := tx.QueryRow(ctx, `UPDATE receiving_vendor_invoice SET ledger_entry_id = $3, status = 'POSTED', released_by = $4, released_at = now()
 			WHERE tenant_id = $1 AND id = $2 AND status = 'AUDIT_BLOCKED' RETURNING released_at`, tenantID, id, inv.LedgerEntryID, by).Scan(&inv.ReleasedAt); err != nil {
 			return notBlockedIfNoRow(err, id)
+		}
+		if err := closeException(ctx, tx, tenantID, id, domain.ExceptionApproved, by, reason); err != nil {
+			return err
 		}
 		if err := markPostingsDone(ctx, tx, tenantID, id, outcome.LedgerEntryID != ""); err != nil {
 			return err
@@ -207,6 +223,9 @@ func (s *Postgres) RejectInvoice(ctx context.Context, id, legalEntityID, by, rea
 		if err := tx.QueryRow(ctx, `UPDATE receiving_vendor_invoice SET status = 'AUDIT_REJECTED', rejected_by = $3, rejected_at = now(), reject_reason = $4
 			WHERE tenant_id = $1 AND id = $2 AND status = 'AUDIT_BLOCKED' RETURNING rejected_at`, tenantID, id, by, reason).Scan(&inv.RejectedAt); err != nil {
 			return notBlockedIfNoRow(err, id)
+		}
+		if err := closeException(ctx, tx, tenantID, id, domain.ExceptionRejected, by, reason); err != nil {
+			return err
 		}
 		return outbox.Enqueue(ctx, tx, invoiceAggregate, id, evt)
 	})
