@@ -193,6 +193,53 @@ test_envoy_decides_the_agent_budget_paths if {
 	}
 }
 
+agents_edge_ops := [op |
+	some op in agents_api_ops
+	not startswith(op[1], "/api/v1/knowledge/")
+]
+
+edge_headers := {"x-depot-tenant": "t", "x-depot-user": "u"}
+
+test_envoy_decides_every_agents_api_path if {
+	every op in agents_edge_ops {
+		base := concat("/", array.slice(split(op[1], "/"), 0, 4))
+		every path in [op[1], trim_prefix(op[1], "/api")] {
+			every duty in op[2] {
+				allowed := envoy with input as envoy_input(op[0], path, edge_headers)
+					with data.assignments as {"t": {"u": [duty]}}
+				allowed.allowed == true
+				allowed.record.duty == duty
+				allowed.record.route == concat("", [op[0], " ", base, "/**"])
+			}
+			refused := envoy with input as envoy_input(op[0], path, edge_headers)
+				with data.assignments as {"t": {"u": ["numbering.read"]}}
+			refused.allowed == false
+			refused.http_status == 403
+			anonymous := envoy with input as envoy_input(op[0], path, {})
+				with data.assignments as {"t": {"u": op[2]}}
+			anonymous.allowed == false
+			anonymous.record.reason == "unauthenticated"
+		}
+	}
+}
+
+test_envoy_refuses_a_person_duty_on_the_workflow_step_route if {
+	every public in ["/api/v1", "/v1"] {
+		every duty in ["agents.invoke", "agents.run.read", "agents.admin"] {
+			answer := envoy with input as envoy_input("POST", concat("", [public, "/agents/runs/r1/steps/plan"]), edge_headers)
+				with data.assignments as {"t": {"u": [duty]}}
+			answer.allowed == false
+			answer.http_status == 403
+		}
+	}
+}
+
+test_the_knowledge_paths_have_no_duty_on_the_edge_base if {
+	every path in ["/api/v1/knowledge/search", "/api/v1/knowledge/chunks"] {
+		count(agents_api_grants("POST", gateway_resource(path))) == 0
+	}
+}
+
 # One request for each D22 prefix (the routes Envoy rewrites to a base that is not /v1/<prefix>), with a duty the
 # catalogue grants under that base. Both public paths are allowed with the duty and refused without it.
 d22_cases := {

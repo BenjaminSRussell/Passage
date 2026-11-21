@@ -1053,6 +1053,38 @@ AGENTS_API_PATHS = (
     "/agents/briefings",
     "/agents/briefings:generate",
     "/agents/briefings/b1:mark-read",
+    "/agents/kill-switch",
+    "/agents/ai-data-policy",
+    "/agents/runs/r1",
+    "/agents/a1/runs",
+    "/agents/runs/r1/steps/plan",
+)
+AGENTS_API_OPERATIONS = (
+    ("GET", "/agents/availability", COPILOT_DUTY),
+    ("GET", "/agents/kill-switch", "agents.admin"),
+    ("POST", "/agents/kill-switch", "agents.admin"),
+    ("GET", "/agents/ai-data-policy", "aipolicy.read"),
+    ("PUT", "/agents/ai-data-policy", "aipolicy.write"),
+    ("GET", "/agents/approvals", "agents.run.read"),
+    ("GET", "/agents/approvals/a1", "agents.run.read"),
+    ("POST", "/agents/runs/r1/actions/a1/decision", "agents.run.read"),
+    ("POST", "/agents/runs/r1/actions/a1:undo", "agents.run.read"),
+    ("POST", "/agents/a1/runs", "agents.invoke"),
+    ("GET", "/agents/runs/r1", "agents.run.read"),
+    ("GET", "/agents/runs/r1/actions", "agents.run.read"),
+    ("POST", "/agents/runs/r1/steps/plan", "agents.run.workflow"),
+    ("POST", "/agents/copilot/conversations", COPILOT_DUTY),
+    ("POST", "/agents/copilot/conversations/c1/messages", COPILOT_DUTY),
+    ("GET", "/agents/budgets", "agentbudget.read"),
+    ("PUT", "/agents/budgets/a1", "agentbudget.write"),
+    ("GET", "/agents/definitions", "agents.admin"),
+    ("POST", "/agents/definitions/a1:disable", "agents.admin"),
+    ("POST", "/agents/definitions/a1:enable", "agents.admin"),
+    ("POST", "/agents/briefings:generate", "agents.invoke"),
+    ("GET", "/agents/briefings", "agents.run.read"),
+    ("GET", "/agents/briefings/b1", "agents.run.read"),
+    ("POST", "/agents/briefings/b1:mark-read", "agents.run.read"),
+    ("POST", "/copilot/chat", COPILOT_DUTY),
 )
 
 
@@ -1126,6 +1158,19 @@ class AgentsApiRoute(unittest.TestCase):
                         self.assertEqual(refused["http_status"], 403)
                         self.assertEqual(json.loads(refused["body"])["errors"]["duty_missing"], COPILOT_DUTY)
                     self.assertFalse(envoy_answer("GET", path, [COPILOT_DUTY])["allowed"])
+
+    def test_every_routed_agents_api_operation_is_decided_by_its_duty(self):
+        for method, rest, duty in AGENTS_API_OPERATIONS:
+            for public in ("/api/v1", "/v1"):
+                path = public + rest
+                with self.subTest(method=method, path=path):
+                    allowed = envoy_answer(method, path, [duty])
+                    self.assertTrue(allowed["allowed"])
+                    self.assertEqual(allowed["record"]["duty"], duty)
+                    refused = envoy_answer(method, path, ["numbering.read"])
+                    self.assertFalse(refused["allowed"])
+                    self.assertEqual(refused["http_status"], 403)
+                    self.assertFalse(envoy_answer(method, path, [duty], headers={})["allowed"])
 
     def test_an_unauthenticated_conversation_call_is_refused(self):
         for rest in COPILOT_PATHS:

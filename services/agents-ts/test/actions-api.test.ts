@@ -260,4 +260,22 @@ describe("gateway entries", () => {
     expect(read).toContainEqual({ resource: "/api/v1/agents/runs/*/actions/*:undo", methods: ["POST"] });
     expect(data.duties[DECIDE]).toEqual({ flag: true, permissions: [] });
   });
+
+  it("holds a duty row for every operation in api/openapi.yaml", () => {
+    const spec = readFileSync(new URL("../api/openapi.yaml", import.meta.url), "utf8").split("\n");
+    const operations: Array<{ method: string; resource: string }> = [];
+    let resource = "";
+    for (const line of spec) {
+      const path = /^ {2}(\/\S+):$/.exec(line);
+      if (path !== null) resource = (path[1] ?? "").replace(/\{[^}]+\}/g, "*");
+      const method = /^ {4}(get|post|put|delete):$/.exec(line);
+      if (method !== null && resource !== "") operations.push({ method: (method[1] ?? "").toUpperCase(), resource });
+    }
+    const granted = Object.values(data.duties).flatMap((duty) => duty.permissions);
+    const missing = operations.filter(
+      (op) => !granted.some((permission) => permission.resource === op.resource && permission.methods.includes(op.method)),
+    );
+    expect(operations.length).toBeGreaterThanOrEqual(27);
+    expect(missing).toEqual([]);
+  });
 });
