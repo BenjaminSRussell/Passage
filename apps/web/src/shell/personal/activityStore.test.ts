@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { PinTarget } from "../pins/pinStore";
 import { noPreferenceStorage } from "../preferenceStorage";
 import { memoryStorage } from "../testing/onboardingFixtures";
-import { activityKey, MAX_ACTIVITY, readActivity, recordActivity } from "./activityStore";
+import { recentKey } from "../recent";
+import { activityKey, MAX_ACTIVITY, readActivity, recordActivity, resetPersonalization } from "./activityStore";
 
 const NOW = () => new Date("2026-11-19T10:00:00.000Z");
 const page = (route: string): PinTarget => ({ kind: "page", route });
@@ -69,5 +70,32 @@ describe("activity store", () => {
       good,
     ]);
     expect(readActivity("ann", memoryStorage({ [activityKey("ann")]: raw }))).toEqual([good]);
+  });
+
+  describe("resetPersonalization", () => {
+    const unrelated = {
+      "depot.pins.v1.ann": '[{"kind":"page","route":"/party"}]',
+      "depot.onboarding.v1.ann": "completed",
+      "depot.ux-telemetry.optout.v1": "1",
+      [activityKey("bob")]: '[{"kind":"page","route":"/b","at":"2026-11-19T10:00:00.000Z"}]',
+      [recentKey("bob")]: '[{"to":"/b","label":"B"}]',
+    };
+    const seeded = () => memoryStorage({ ...unrelated, [activityKey("ann")]: "[]", [recentKey("ann")]: "[]" });
+
+    it("removes only the activity and recents keys of that identity", () => {
+      const storage = seeded();
+      resetPersonalization("ann", storage);
+      expect(Object.fromEntries(storage.entries)).toEqual(unrelated);
+    });
+
+    it("removes nothing for an empty identity", () => {
+      const storage = memoryStorage({ ...unrelated, [activityKey("")]: "[]", [recentKey("")]: "[]" });
+      resetPersonalization("", storage);
+      expect(storage.entries.size).toBe(Object.keys(unrelated).length + 2);
+    });
+
+    it("does not throw when the browser refuses storage", () => {
+      expect(() => resetPersonalization("ann", noPreferenceStorage)).not.toThrow();
+    });
   });
 });

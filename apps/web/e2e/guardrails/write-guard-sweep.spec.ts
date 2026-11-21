@@ -96,6 +96,18 @@ const SCENARIOS: Record<string, Scenario> = {
       writeGuard.expectNoWrites();
     },
   },
+  "personalization-reset": {
+    run: async (page, writeGuard) => {
+      await page.addInitScript(([key, value]) => window.localStorage.setItem(key, value), [`depot.activity.v1.${DEV_IDENTITY}`, JSON.stringify(PINS)] as const);
+      await new ShellPage(page).goto("/");
+      await page.getByRole("button", { name: "Reset personalization" }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: "Keep it" }).click();
+      await page.getByRole("button", { name: "Reset personalization" }).click();
+      await page.getByRole("alertdialog").getByRole("button", { name: "Reset", exact: true }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Personalization reset" })).toBeVisible();
+      writeGuard.expectNoWrites();
+    },
+  },
   onboarding: {
     fresh: true,
     run: async (page, writeGuard) => {

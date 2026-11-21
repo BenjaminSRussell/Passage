@@ -245,6 +245,12 @@ export const copy = {
     recentTitle: "Recent",
     recentEmpty: "Pages you open show up here, so you can get back to them quickly.",
     recentRecords: "Recent records",
+    resetPersonalization: "Reset personalization",
+    resetTitle: "Reset your personalization?",
+    resetDescription: "This clears your recent pages and records, and the order and suggestions this home page learned from them. Your pins, setup and settings are kept.",
+    resetConfirm: "Reset",
+    resetCancel: "Keep it",
+    resetDone: "Personalization reset. The home page is back to its defaults.",
     suggestionsTitle: "Try asking...",
     suggestionPrompts: {
       attention: "What needs my attention today?",

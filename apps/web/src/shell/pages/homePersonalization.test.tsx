@@ -1,10 +1,12 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadModules, type DepotModule } from "../../modules/registry";
 import { AVAILABILITY_PATH } from "../assistant/availability";
 import { copy } from "../copy";
 import { activityKey } from "../personal/activityStore";
+import { recentKey } from "../recent";
 import { Shell } from "../Shell";
 import { availableAssistant, json, pageViolations, server, useFakeServer } from "../testing/fakeServer";
 import { completedOnboardingStorage } from "../testing/onboardingFixtures";
@@ -152,5 +154,64 @@ describe("role- and activity-aware home", () => {
     expect(rows).toHaveLength(1);
     expect(Object.keys(rows[0] ?? {}).sort()).toEqual(["at", "kind", "route"]);
     expect(rows[0]).toMatchObject({ kind: "page", route: "/ledger/transactions" });
+  });
+});
+
+describe("reset personalization", () => {
+  const UNRELATED = "depot.pins.v1.ann";
+  const RECENT = [{ to: "/ledger/transactions", label: "Transactions" }];
+  const seedAll = () => {
+    seed(transactionsActivity);
+    localStorage.setItem(recentKey(IDENTITY), JSON.stringify(RECENT));
+    localStorage.setItem(UNRELATED, "keep me");
+  };
+  const open = async () => {
+    renderHome([COPILOT_DUTY, INVOICE_DUTY]);
+    await askBox();
+    await userEvent.click(main().getByRole("button", { name: copy.home.resetPersonalization }));
+    return screen.getByRole("alertdialog", { name: copy.home.resetTitle });
+  };
+
+  it("keeps everything when the person cancels or presses Escape", async () => {
+    seedAll();
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: copy.home.resetCancel }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await userEvent.click(main().getByRole("button", { name: copy.home.resetPersonalization }));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(workspaceOrder()).toEqual(["Alpha", "Gamma", "Beta"]);
+    expect(localStorage.getItem(activityKey(IDENTITY))).not.toBeNull();
+    expect(localStorage.getItem(recentKey(IDENTITY))).not.toBeNull();
+  });
+
+  it("restores the defaults on confirm and clears only the activity and recents keys", async () => {
+    seedAll();
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: copy.home.resetConfirm }));
+    await waitFor(() => expect(workspaceOrder()).toEqual(["Alpha", "Beta", "Gamma"]));
+    expect(await suggestions()).toEqual([copy.home.suggestionPrompts.attention]);
+    expect(main().getByText(copy.home.recentEmpty)).toBeInTheDocument();
+    expect(main().queryByRole("list", { name: copy.home.recentRecords })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("status").map((el) => el.textContent)).toContain(copy.home.resetDone);
+    expect(localStorage.getItem(activityKey(IDENTITY))).toBeNull();
+    expect(localStorage.getItem(recentKey(IDENTITY))).toBeNull();
+    expect(localStorage.getItem(UNRELATED)).toBe("keep me");
+  });
+
+  it("completes when the stored activity is corrupt", async () => {
+    seed("{");
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: copy.home.resetConfirm }));
+    await waitFor(() => expect(localStorage.getItem(activityKey(IDENTITY))).toBeNull());
+    expect(workspaceOrder()).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("has no axe violations with the control shown", async () => {
+    const { container } = renderHome([COPILOT_DUTY, INVOICE_DUTY]);
+    await askBox();
+    expect(main().getByRole("button", { name: copy.home.resetPersonalization })).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
   });
 });

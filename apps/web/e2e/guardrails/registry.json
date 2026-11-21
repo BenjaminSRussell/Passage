@@ -26,7 +26,7 @@
     { "id": "feed-inline-decisions", "status": "pending", "ticket": "DEPOT-346", "outcomes": ["O2"] },
     { "id": "proposal-start-in-help", "status": "pending", "ticket": "DEPOT-281/DEPOT-282", "outcomes": ["O4", "O6"] },
     { "id": "proposal-approve-decline", "status": "pending", "ticket": "DEPOT-282", "outcomes": ["O4"] },
-    { "id": "personalization-reset", "status": "pending", "ticket": "DEPOT-348", "outcomes": ["O9"] },
+    { "id": "personalization-reset", "status": "present", "outcomes": ["O9"] },
     { "id": "three-way-match-feed", "status": "pending", "ticket": "DEPOT-342", "outcomes": ["O2"] },
     { "id": "anomaly-feed", "status": "pending", "ticket": "DEPOT-343", "outcomes": ["O2", "O7"] }
   ]
