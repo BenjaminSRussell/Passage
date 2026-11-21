@@ -23,7 +23,25 @@ function acceptedPrefix({ valid, longestValidPrefix }: Pattern, value: string): 
   return null;
 }
 
-const AFTER_LABEL = String.raw`["']?\s{0,3}[:=#]?\s{0,3}"?`;
+const WS_MAX = 3;
+const AFTER_LABEL = String.raw`["']?\s{0,${WS_MAX}}[:=#]?\s{0,${WS_MAX}}"?`;
+const AFTER_LABEL_MAX = 1 + WS_MAX + 1 + WS_MAX + 1;
+const LABEL_WORD_MAX = 12;
+const PAY_JSON_GAP_MAX = 80;
+const PAY_SEPARATOR = String.raw`\s{0,${WS_MAX}}[:=]\s{0,${WS_MAX}}|\s(?:is|of)\s`;
+const PAY_AFTER_LABEL_MAX = 1 + Math.max(WS_MAX + 1 + WS_MAX, 1 + "is".length + 1);
+const PAY_JSON_KEYS = ["amount", "value", "gross", "net", "base"] as const;
+const PAY_JSON_KEY_MAX = 1 + PAY_JSON_GAP_MAX + 1 + Math.max(...PAY_JSON_KEYS.map((k) => k.length)) + 1 + WS_MAX + 1 + WS_MAX;
+const PAY_CURRENCY_MAX = 1 + 4;
+
+const LOOKBEHIND_MAX: Readonly<Record<"PAY" | "SSN" | "TAXID" | "BANKACCT", number>> = {
+  PAY: "compensation".length + LABEL_WORD_MAX + PAY_AFTER_LABEL_MAX + PAY_JSON_KEY_MAX + PAY_CURRENCY_MAX,
+  SSN: "ssn".length + LABEL_WORD_MAX + AFTER_LABEL_MAX,
+  TAXID: "GSTIN_number.".length + AFTER_LABEL_MAX + "DE ".length,
+  BANKACCT: "account".length + LABEL_WORD_MAX + " number.".length + AFTER_LABEL_MAX,
+};
+
+export const MAX_LOOKBEHIND_CHARS = Math.max(...Object.values(LOOKBEHIND_MAX));
 
 const PATTERNS: Readonly<Record<PiiCategory, Pattern>> = {
   // The lookbehind starts a match only at the beginning of a local part, so a long
@@ -31,16 +49,22 @@ const PATTERNS: Readonly<Record<PiiCategory, Pattern>> = {
   EMAIL: { re: /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g },
   IBAN: { re: /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b/gi, valid: ibanChecksumValid, longestValidPrefix: true },
   CARD: { re: /\b(?:\d{13,19}|\d{4}([ -])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ -])\d{6}\2\d{4,5})\b/g, valid: luhnValid },
-  SSN: { re: new RegExp(String.raw`\b\d{3}-\d{2}-\d{4}\b|(?<=\bssn\w{0,12}${AFTER_LABEL})\d{9}\b`, "gi") },
+  // LOOKBEHIND_MAX.SSN
+  SSN: { re: new RegExp(String.raw`\b\d{3}-\d{2}-\d{4}\b|(?<=\bssn\w{0,${LABEL_WORD_MAX}}${AFTER_LABEL})\d{9}\b`, "gi") },
+  // LOOKBEHIND_MAX.TAXID
   TAXID: {
     re: new RegExp(String.raw`(?<=\b(?:(?:EIN|VAT|GSTIN|RFC|TIN)(?:[ _]?(?:id|number|no|num)\.?)?|tax[ _]?(?:id|number|no|num)\.?)${AFTER_LABEL}(?:[A-Z]{2} )?)[A-Z0-9&][A-Z0-9&.-]{4,20}[A-Z0-9]`, "gi"),
     valid: validTaxId,
   },
-  BANKACCT: { re: new RegExp(String.raw`(?<=(?:account|acct)\w{0,12}(?: (?:number|no|num)\.?)?${AFTER_LABEL})\d(?:[ -]?\d){5,16}\b`, "gi") },
+  // LOOKBEHIND_MAX.BANKACCT
+  BANKACCT: { re: new RegExp(String.raw`(?<=(?:account|acct)\w{0,${LABEL_WORD_MAX}}(?: (?:number|no|num)\.?)?${AFTER_LABEL})\d(?:[ -]?\d){5,16}\b`, "gi") },
+  // LOOKBEHIND_MAX.PAY
   PAY: {
-    re: new RegExp(String.raw`(?<=(?:salary|wage|pay[ _-]?rate|base[ _-]?pay|hourly[ _-]?rate|bonus|compensation)\w{0,12}["']?(?:\s{0,3}[:=]\s{0,3}|\s(?:is|of)\s)(?:\{[^{}]{0,80}?"(?:amount|value|gross|net|base)"\s{0,3}:\s{0,3})?"?(?:[A-Za-z]{3}\s?|[$€£]\s?)?)\d(?:[\d,.]*\d)?`, "gi"),
+    re: new RegExp(String.raw`(?<=(?:salary|wage|pay[ _-]?rate|base[ _-]?pay|hourly[ _-]?rate|bonus|compensation)\w{0,${LABEL_WORD_MAX}}["']?(?:${PAY_SEPARATOR})(?:\{[^{}]{0,${PAY_JSON_GAP_MAX}}?"(?:${PAY_JSON_KEYS.join("|")})"\s{0,${WS_MAX}}:\s{0,${WS_MAX}})?"?(?:[A-Za-z]{3}\s?|[$€£]\s?)?)\d(?:[\d,.]*\d)?`, "gi"),
   },
 };
+
+export const piiPatternSource = (category: PiiCategory): string => PATTERNS[category].re.source;
 
 export const PSEUDONYM_RE = /\[(?:EMAIL|IBAN|CARD|SSN|TAXID|BANKACCT|PAY|AMOUNT)-\d+\]/g;
 

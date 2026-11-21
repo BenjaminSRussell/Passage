@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createAgentsHandler, type AgentsApiDeps } from "./api/router.js";
+import type { TaskFallbackReason } from "./runtime/copilot.js";
 import type { GuardDecision } from "./runtime/egressGuard.js";
 
 const ROUTES = ["healthz", "readyz", "kill-switch", "ai-data-policy", "start-run", "run", "chat", "conversations", "messages", "decision", "budgets", "definitions", "briefings", "other"] as const;
@@ -29,6 +30,11 @@ const GUARD_BUCKETS = [0.005, 0.025, 0.1, 0.5, 2];
 export class Metrics {
   private readonly http = new Map<string, number>();
   private readonly guard = new Map<string, { buckets: number[]; sum: number; count: number }>();
+  private readonly taskFallback = new Map<TaskFallbackReason, number>();
+
+  countTaskFallback(reason: TaskFallbackReason): void {
+    this.taskFallback.set(reason, (this.taskFallback.get(reason) ?? 0) + 1);
+  }
 
   observeGuard(seconds: number, decision: GuardDecision): void {
     const h = this.guard.get(decision) ?? { buckets: GUARD_BUCKETS.map(() => 0), sum: 0, count: 0 };
@@ -59,6 +65,8 @@ export class Metrics {
       lines.push(`agents_egress_guard_duration_seconds_bucket{decision="${decision}",le="+Inf"} ${h.count}`);
       lines.push(`agents_egress_guard_duration_seconds_sum{decision="${decision}"} ${h.sum}`, `agents_egress_guard_duration_seconds_count{decision="${decision}"} ${h.count}`);
     }
+    lines.push("# HELP agents_copilot_task_fallback_total Task-mode chats answered without a tool, by reason.", "# TYPE agents_copilot_task_fallback_total counter");
+    for (const reason of [...this.taskFallback.keys()].sort()) lines.push(`agents_copilot_task_fallback_total{reason="${reason}"} ${this.taskFallback.get(reason) ?? 0}`);
     return `${lines.join("\n")}\n`;
   }
 }

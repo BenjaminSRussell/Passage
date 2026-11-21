@@ -13,7 +13,9 @@ export function createFetchUpstream(
   return {
     async send({ tool, args, headers }: UpstreamRequest): Promise<UpstreamResponse> {
       const rest: Record<string, unknown> = { ...args };
-      const path = tool.path.replace(/\{([^}]+)\}/g, (_match, key: string) => {
+      const { method, path: template } = tool;
+      if (method === undefined || template === undefined) throw new Error(`${tool.name} has no upstream route`);
+      const path = template.replace(/\{([^}]+)\}/g, (_match, key: string) => {
         const value = rest[key];
         delete rest[key];
         if (value === undefined || value === null || value === "") {
@@ -28,8 +30,8 @@ export function createFetchUpstream(
       delete rest.idempotencyKey;
 
       const url = new URL(path, baseUrl);
-      const init: RequestInit = { method: tool.method, headers: reqHeaders, signal: AbortSignal.timeout(timeoutMs) };
-      if (tool.method === "GET" || tool.method === "DELETE") {
+      const init: RequestInit = { method, headers: reqHeaders, signal: AbortSignal.timeout(timeoutMs) };
+      if (method === "GET" || method === "DELETE") {
         for (const [k, v] of Object.entries(rest)) {
           if (v === undefined || v === null) continue;
           url.searchParams.set(k, typeof v === "object" ? JSON.stringify(v) : String(v));

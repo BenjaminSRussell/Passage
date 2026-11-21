@@ -8,6 +8,8 @@ describe("validateToolDefinition", () => {
   const cases: Array<{ name: string; tool: ReturnType<typeof readTool>; want: string | null }> = [
     { name: "valid read tool", tool: readTool("depot.ap.invoice.list", "APInvoiceRead"), want: null },
     { name: "valid three-segment tool", tool: readTool("depot.knowledge.search", "mcp.copilot.use"), want: null },
+    { name: "local tool without method and path", tool: { ...readTool("depot.meta.search_tools", "mcp.copilot.use"), method: undefined, path: undefined, local: () => ({}) }, want: null },
+    { name: "upstream tool without method and path", tool: { ...readTool("depot.ap.invoice.list", "APInvoiceRead"), method: undefined, path: undefined }, want: "method and path are required" },
     { name: "bad name", tool: readTool("ap.invoice.list", "APInvoiceRead"), want: "must match" },
     { name: "missing duty", tool: readTool("depot.ap.invoice.list", ""), want: "x-depot-duty" },
     { name: "write tool without approval", tool: writeTool("depot.ap.invoice.post", "APInvoicePost", { approvalMode: "none" }), want: "write tools" },
