@@ -5356,9 +5356,9 @@ flowchart LR
   PWAs -. import .-> PKG
 
   subgraph Edge["Envoy Gateway (TLS 1.3, JWT validation, rate limits, coarse route-duty check)"]
-    WBFF["web-bff<br/>services/web-bff-ts"]
-    DBFF["device-bff<br/>services/device-bff-ts"]
-    PBFF["portal-bff<br/>services/portal-bff-ts"]
+    WBFF["web-bff (target, not built, ADR-0009)<br/>services/web-bff-ts"]
+    DBFF["device-bff (target, not built, ADR-0009)<br/>services/device-bff-ts"]
+    PBFF["portal-bff (as built)<br/>services/portal-bff-ts"]
   end
 
   SHELL -- "cookie session<br/>/bff/* , /api/v1/*" --> WBFF
