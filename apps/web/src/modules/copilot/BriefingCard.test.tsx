@@ -1,8 +1,9 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AvailabilityProvider, type AiAvailability } from "../../shell/assistant/AvailabilityProvider";
+import { AI_REQUEST_TIMEOUT_MS } from "../../shell/assistant/availability";
 import { PrincipalProvider } from "../../shell/principal";
 import { json, server, useFakeServer } from "../../shell/testing/fakeServer";
 import { pageViolations } from "./a11yTest";
@@ -130,6 +131,49 @@ describe("BriefingCard", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("button", { name: "Recommended actions (1)" })).toBeInTheDocument();
     expect(server.calls).toHaveLength(2);
+  });
+
+  it.each([
+    ["a 503", json(503, { code: "AGT-0202", detail: "The assistant is switched off." })],
+    ["a 503 without a problem body", json(503, {})],
+    ["the kill-switch code", json(409, { code: "AGT-0201" })],
+    ["the budget-stop code", json(429, { code: "AGT-0202" })],
+  ])("degrades quietly, with no alert, when the AI layer answers with %s", async (_label, reply) => {
+    server.handler = () => reply;
+    renderCard();
+    expect(await screen.findByText(/briefing is unavailable while the assistant is/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("degrades quietly when the network request fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    renderCard();
+    expect(await screen.findByText(/briefing is unavailable while the assistant is/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("degrades quietly when the AI layer times out", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))))),
+      );
+      renderCard();
+      await vi.advanceTimersByTimeAsync(AI_REQUEST_TIMEOUT_MS);
+      expect(await screen.findByText(/briefing is unavailable while the assistant is/)).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the danger alert with Try again for a validation failure", async () => {
+    server.handler = () => json(422, { code: "AGT-0422" });
+    renderCard();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your briefing could not be loaded");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
   it("treats a body that fails the strict schema as an error and renders nothing from it", async () => {

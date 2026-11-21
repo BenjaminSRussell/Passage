@@ -3,12 +3,14 @@ package consumer
 import (
 	"context"
 	"errors"
+	"github.com/shopspring/decimal"
 	"testing"
 
 	"github.com/BenjaminSRussell/depot/platform/dbx"
 	"github.com/BenjaminSRussell/depot/platform/events"
 	"github.com/BenjaminSRussell/depot/platform/tenant"
 	"github.com/BenjaminSRussell/depot/platform/testkit"
+	"github.com/BenjaminSRussell/depot/services/payables/internal/party"
 	"github.com/BenjaminSRussell/depot/services/payables/internal/store"
 	"github.com/BenjaminSRussell/depot/services/payables/migrations"
 )
@@ -139,5 +141,104 @@ func TestHandleInvoicePosted_StoresVendorGroupAndBackfillsOnRedelivery(t *testin
 		if err := HandleInvoicePosted(context.Background(), s, event(t, InvoicePostedType, payload(map[string]any{"vendor_group_code": bad}))); !errors.Is(err, ErrInvalidEvent) {
 			t.Fatalf("vendor_group_code %q err = %v, want ErrInvalidEvent", bad, err)
 		}
+	}
+}
+
+type fakeTerms struct {
+	dates  party.TermDates
+	err    error
+	called int
+	gotLE  string
+	gotDay string
+}
+
+func (f *fakeTerms) TermDates(_ context.Context, legalEntityID, _, documentDate string) (party.TermDates, error) {
+	f.called++
+	f.gotLE, f.gotDay = legalEntityID, documentDate
+	return f.dates, f.err
+}
+
+const termID = "00000000-0000-0000-0000-0000000000d1"
+
+func twoTenNetThirty() *fakeTerms {
+	return &fakeTerms{dates: party.TermDates{DueDate: "2027-03-31", Discounts: []party.DiscountDate{{Percent: decimal.NewFromInt(2), Date: "2027-03-11"}}}}
+}
+
+func openItems(t *testing.T, s *store.Postgres) []store.OpenItem {
+	t.Helper()
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le})
+	items, err := s.List(ctx, store.Filter{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return items
+}
+
+func TestHandleInvoicePosted_DatesFromTerm(t *testing.T) {
+	s := setup(t)
+	f := twoTenNetThirty()
+	if err := HandleInvoicePostedWithTerms(context.Background(), s, f, event(t, InvoicePostedType, payload(map[string]any{"payment_term_id": termID}))); err != nil {
+		t.Fatal(err)
+	}
+	items := openItems(t, s)
+	if len(items) != 1 || f.gotLE != le || f.gotDay != "2027-03-01" {
+		t.Fatalf("items = %+v resolver saw %s %s", items, f.gotLE, f.gotDay)
+	}
+	got := items[0]
+	if got.DueDate != "2027-03-31" || got.DueDateSource != store.DueDateTerms || got.DiscountDate == nil || *got.DiscountDate != "2027-03-11" || got.DiscountAmount.String() != "25.01" {
+		t.Fatalf("2/10 net 30 on 1250.50 must give due 2027-03-31, discount 2027-03-11 of 25.01: %+v", got)
+	}
+}
+
+func TestHandleInvoicePosted_ShiftedDueDateFromPartyIsStored(t *testing.T) {
+	s := setup(t)
+	f := &fakeTerms{dates: party.TermDates{DueDate: "2027-04-01"}}
+	if err := HandleInvoicePostedWithTerms(context.Background(), s, f, event(t, InvoicePostedType, payload(map[string]any{"payment_term_id": termID}))); err != nil {
+		t.Fatal(err)
+	}
+	if items := openItems(t, s); len(items) != 1 || items[0].DueDate != "2027-04-01" || items[0].DiscountDate != nil || !items[0].DiscountAmount.IsZero() {
+		t.Fatalf("items = %+v", items)
+	}
+}
+
+func TestHandleInvoicePosted_TermLookupFailureIsRetriedNotDefaulted(t *testing.T) {
+	s := setup(t)
+	for name, resolveErr := range map[string]error{"party down": errors.New("party: 503"), "unknown term": party.ErrTermNotFound} {
+		f := &fakeTerms{err: resolveErr}
+		err := HandleInvoicePostedWithTerms(context.Background(), s, f, event(t, InvoicePostedType, payload(map[string]any{"payment_term_id": termID})))
+		if !errors.Is(err, resolveErr) || errors.Is(err, ErrInvalidEvent) {
+			t.Fatalf("%s: err = %v, want the resolver error so the event is retried", name, err)
+		}
+	}
+	if items := openItems(t, s); len(items) != 0 {
+		t.Fatalf("no open item may be created from a failed lookup: %+v", items)
+	}
+}
+
+func TestHandleInvoicePosted_ExplicitDueDateBeatsTerm(t *testing.T) {
+	s := setup(t)
+	f := twoTenNetThirty()
+	evt := event(t, InvoicePostedType, payload(map[string]any{"payment_term_id": termID, "due_date": "2027-05-05"}))
+	if err := HandleInvoicePostedWithTerms(context.Background(), s, f, evt); err != nil {
+		t.Fatal(err)
+	}
+	if items := openItems(t, s); f.called != 0 || len(items) != 1 || items[0].DueDate != "2027-05-05" || items[0].DueDateSource != store.DueDateEvent {
+		t.Fatalf("resolver called %d times, items %+v", f.called, items)
+	}
+}
+
+func TestHandleInvoicePosted_TermIdIsValidated(t *testing.T) {
+	s := setup(t)
+	f := twoTenNetThirty()
+	for name, evt := range map[string]events.Event{
+		"non-uuid term":   event(t, InvoicePostedType, payload(map[string]any{"payment_term_id": "net30"})),
+		"no invoice date": event(t, InvoicePostedType, payload(map[string]any{"payment_term_id": termID, "invoice_date": ""})),
+	} {
+		if err := HandleInvoicePostedWithTerms(context.Background(), s, f, evt); !errors.Is(err, ErrInvalidEvent) {
+			t.Errorf("%s: err = %v, want ErrInvalidEvent", name, err)
+		}
+	}
+	if f.called != 0 {
+		t.Fatalf("an invalid event must not reach party: %d calls", f.called)
 	}
 }

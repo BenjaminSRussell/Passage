@@ -46,6 +46,8 @@ channels:
     messages:
       revealed:
         $ref: '#/components/messages/vendorBankRevealed'
+      changed:
+        $ref: '#/components/messages/vendorBankChanged'
   depot.party.vendorgroup:
     address: depot.party.vendorgroup
     messages:
@@ -83,6 +85,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/depot.party.vendorbank' }
     messages: [{ $ref: '#/channels/depot.party.vendorbank/messages/revealed' }]
+  onVendorBankChanged:
+    action: send
+    channel: { $ref: '#/channels/depot.party.vendorbank' }
+    messages: [{ $ref: '#/channels/depot.party.vendorbank/messages/changed' }]
   onProtectedFieldsUpdated:
     action: send
     channel: { $ref: '#/channels/depot.party.protectedfields' }
@@ -281,6 +287,24 @@ components:
           account_count: { type: integer }
           revealed_at: { type: string, format: date-time }
       x-depot-type: dev.depot.party.vendorbank.revealed.v1
+    vendorBankChanged:
+      name: changed
+      title: Vendor bank account approved
+      description: A second person approved a new vendor bank account. The out-of-band notice to the vendor contact is sent from this event. Carries last four digits only.
+      payload:
+        type: object
+        required: [vendor_id, legal_entity_id, bank_account_id, change_id, new_last4, replaced_last4, requested_by, approved_by, notice_required]
+        properties:
+          vendor_id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          bank_account_id: { type: string, format: uuid }
+          change_id: { type: string, format: uuid }
+          new_last4: { type: string }
+          replaced_last4: { type: array, items: { type: string } }
+          requested_by: { type: string }
+          approved_by: { type: string }
+          notice_required: { type: boolean }
+      x-depot-type: dev.depot.party.vendorbank.changed.v1
     vendorInviteCreated:
       name: created
       title: Vendor user invited

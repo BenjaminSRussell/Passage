@@ -32,7 +32,7 @@ func TestPayloads_MatchAsyncAPI(t *testing.T) {
 		{"resourceChanged", events.ResourceChanged, events.ResourceChangedData{ChangedFields: []string{"x"}, SiteID: "s", CalendarID: "c"}},
 		{"calendarGenerated", events.CalendarGenerated, events.CalendarGeneratedData{}},
 		{"ecrSubmitted", events.EcrSubmitted, events.EcrData{DecidedBy: "d"}},
-		{"ecoSubmitted", events.EcoSubmitted, events.EcoData{ApproverID: "a", EcrID: "e", ReleaseDate: "2026-01-01"}},
+		{"ecoSubmitted", events.EcoSubmitted, events.EcoData{ApproverID: "a", EcrID: "e", ReleaseDate: "2026-01-01", LegalEntityID: "le"}},
 		{"releaseSessionCreated", events.ReleaseSessionCreated, events.ReleaseSessionCreatedData{Source: "eco"}},
 		{"documentSigned", events.DocumentSigned, events.DocumentSignedData{SignedAt: "2026-07-01T12:00:00Z"}},
 		{"ebomImported", events.EbomImported, events.EbomImportedData{Added: 1, Exceptions: 0}},

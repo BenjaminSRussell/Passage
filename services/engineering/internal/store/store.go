@@ -670,6 +670,13 @@ func emit(ctx context.Context, tx pgx.Tx, p tenant.Principal, correlationID, typ
 	return outbox.Enqueue(ctx, tx, aggregateType, aggregateID, evt)
 }
 
+func singleLegalEntity(p tenant.Principal) string {
+	if scopes := tenant.LegalEntityScopeList(p); len(scopes) == 1 {
+		return scopes[0]
+	}
+	return ""
+}
+
 func (s *Postgres) CreateEco(ctx context.Context, e domain.Eco, idem Idem) (domain.Eco, error) {
 	p, _ := tenant.FromContext(ctx)
 	created := e
@@ -759,7 +766,9 @@ func (s *Postgres) CreateEco(ctx context.Context, e domain.Eco, idem Idem) (doma
 				return err
 			}
 		}
-		if err := emit(ctx, tx, p, e.ID, engevents.EcoSubmitted, aggregateEco, e.ID, e.EventData()); err != nil {
+		submitted := e.EventData()
+		submitted.LegalEntityID = singleLegalEntity(p)
+		if err := emit(ctx, tx, p, e.ID, engevents.EcoSubmitted, aggregateEco, e.ID, submitted); err != nil {
 			return err
 		}
 		return remember(ctx, tx, p.TenantID, idem, e.ID)

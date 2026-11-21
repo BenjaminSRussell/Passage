@@ -8,6 +8,7 @@ import { useDesignation, type Marking } from "../useDesignation";
 import { localPreferenceStorage, noPreferenceStorage, type PreferenceStorage } from "../preferenceStorage";
 import { Alert } from "./Alert";
 import { Button } from "./Button";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { DataMarking } from "./DataMarking";
 import { downloadCsv, toCsv } from "./csv";
 import { DataTable, type DataTableColumn } from "./DataTable";
@@ -34,12 +35,38 @@ import {
   type ViewStore,
 } from "./listViews";
 import { PageHeader } from "./PageHeader";
+import { PasteDialog, type PasteField } from "./PasteDialog";
 
 export interface ListColumn<T> extends DataTableColumn<T> {
   sortValue?(row: T): unknown;
   csv?(row: T): string | number | null | Promise<string | number | null>;
   csvWith?: string;
   defaultHidden?: boolean;
+}
+
+export interface BulkResult {
+  done: string[];
+  failed: { key: string; reason: string }[];
+}
+
+export interface BulkAction<T> {
+  id: string;
+  label: string;
+  run(rows: T[]): Promise<BulkResult>;
+  confirm?: { title: string; description: string; confirmLabel: string };
+  undo?(done: string[]): Promise<void>;
+}
+
+export interface PasteConfig {
+  fields: PasteField[];
+  onCommit(rows: Record<string, unknown>[]): Promise<BulkResult>;
+  undo?(done: string[]): Promise<void>;
+}
+
+interface Outcome {
+  title: string;
+  failed: BulkResult["failed"];
+  problem?: unknown;
 }
 
 export interface ListData<T> {
@@ -89,6 +116,9 @@ export interface ListPageProps<T> {
   defaultFilters?: FilterValues;
   storage?: PreferenceStorage;
   designation?: { entityType: string; idOf(row: T): string };
+  bulk?: BulkAction<T>[];
+  paste?: PasteConfig;
+  rowLabel?(row: T): string;
 }
 
 interface Start {
@@ -175,6 +205,9 @@ export function ListPage<T>({
   defaultFilters,
   storage: preferred = localPreferenceStorage,
   designation,
+  bulk,
+  paste,
+  rowLabel,
 }: ListPageProps<T>) {
   const marked = designation !== undefined;
   const markRef = useRef<(row: T) => Marking>(() => PENDING);
@@ -225,6 +258,13 @@ export function ListPage<T>({
   const [searchText, setSearchText] = useState("");
   const [undo, setUndo] = useState<{ view: SavedView; index: number; wasDefault: boolean; wasActive: boolean } | null>(null);
 
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [confirming, setConfirming] = useState<BulkAction<T> | null>(null);
+  const [pasting, setPasting] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [bulkUndo, setBulkUndo] = useState<(() => Promise<void>) | null>(null);
+  const [busy, setBusy] = useState(false);
+
   const data = useRows(query);
   const designations = useDesignation(
     designation ? data.rows.map((row) => ({ entityType: designation.entityType, recordId: designation.idOf(row) })) : [],
@@ -252,6 +292,81 @@ export function ListPage<T>({
   }, [loadedRowsShown, localSort, query.sort, columns]);
   const searching = search !== undefined && searchText.trim() !== "";
   const rows = useMemo(() => (search && searching ? filterBySearch(sorted, searchText, search) : sorted), [sorted, search, searching, searchText]);
+
+  const selectable = bulk !== undefined && bulk.length > 0;
+  const chosen: T[] = [];
+  const chosenKeys = new Set<string>();
+  if (selectable) {
+    rows.forEach((row, index) => {
+      const key = getRowKey(row, index);
+      if (selected.has(key)) {
+        chosen.push(row);
+        chosenKeys.add(key);
+      }
+    });
+  }
+  const labelOf = (row: T, index: number) => (rowLabel ? rowLabel(row) : getRowKey(row, index));
+
+  function select(next: ReadonlySet<string>) {
+    setSelected(next);
+    setBulkUndo(null);
+  }
+
+  function toggleRow(key: string) {
+    const next = new Set(chosenKeys);
+    if (!next.delete(key)) next.add(key);
+    select(next);
+  }
+
+  function toggleAll() {
+    select(chosen.length === rows.length ? new Set() : new Set(rows.map(getRowKey)));
+  }
+
+  async function runBulk(run: () => Promise<BulkResult>, undo: ((done: string[]) => Promise<void>) | undefined, narrow: boolean) {
+    setBulkUndo(null);
+    setOutcome(null);
+    setBusy(true);
+    try {
+      const result = await run();
+      if (!Array.isArray(result?.done) || !Array.isArray(result?.failed)) {
+        throw new Error(copy.lists.bulkMalformed);
+      }
+      if (narrow) setSelected(new Set(result.failed.map((f) => f.key)));
+      setOutcome(result.failed.length > 0 ? { title: copy.lists.bulkPartialTitle, failed: result.failed } : null);
+      const { done } = result;
+      if (result.failed.length > 0) setMessage(copy.lists.bulkPartial(done.length, result.failed.length));
+      else setMessage(done.length === 0 ? copy.lists.bulkNothing : copy.lists.bulkDone(done.length, nounFor(done.length)));
+      if (undo && done.length > 0) setBulkUndo(() => () => undo(done));
+    } catch (error) {
+      setMessage("");
+      setOutcome({ title: copy.lists.bulkFailedTitle, failed: [], problem: error });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startBulk(action: BulkAction<T>) {
+    setConfirming(null);
+    void runBulk(() => action.run(chosen), action.undo, true);
+  }
+
+  async function undoBulk() {
+    const run = bulkUndo;
+    setBulkUndo(null);
+    try {
+      await run?.();
+      setOutcome(null);
+      setMessage(copy.lists.bulkUndone);
+    } catch (error) {
+      setMessage("");
+      setOutcome({ title: copy.lists.undoBulkFailedTitle, failed: [], problem: error });
+    }
+  }
+
+  function labelForKey(key: string) {
+    const index = rows.findIndex((row, i) => getRowKey(row, i) === key);
+    return index >= 0 ? labelOf(rows[index], index) : key;
+  }
 
   const active = store.views.find((v) => v.id === activeId);
   const filtered = Object.keys(query.filters).length > 0;
@@ -456,11 +571,34 @@ export function ListPage<T>({
                 onToggle={toggleColumn}
                 onReset={() => showColumns(defaultVisible(columns))}
               />
+              {paste ? (
+                <Button size="sm" onClick={() => setPasting(true)}>
+                  {copy.lists.pasteRows}
+                </Button>
+              ) : null}
               <Button size="sm" onClick={() => void exportCsv()}>
                 {copy.lists.exportCsv}
               </Button>
             </div>
           </div>
+          {selectable ? (
+            <p className="visually-hidden" role="status">
+              {chosen.length > 0 ? copy.lists.selected(chosen.length, rows.length, nounFor(chosen.length)) : ""}
+            </p>
+          ) : null}
+          {selectable && chosen.length > 0 ? (
+            <div className={styles.bulkBar} role="region" aria-label={copy.lists.bulkLabel}>
+              <span>{copy.lists.selected(chosen.length, rows.length, nounFor(chosen.length))}</span>
+              {bulk.map((action) => (
+                <Button key={action.id} size="sm" disabled={busy} onClick={() => (action.confirm ? setConfirming(action) : startBulk(action))}>
+                  {action.label}
+                </Button>
+              ))}
+              <Button size="sm" onClick={() => select(new Set())}>
+                {copy.lists.clearSelection}
+              </Button>
+            </div>
+          ) : null}
           <p className={styles.status} role="status">
             {message}
             {undo ? (
@@ -471,9 +609,30 @@ export function ListPage<T>({
                 </Button>
               </>
             ) : null}
+            {bulkUndo ? (
+              <>
+                {" "}
+                <Button size="sm" onClick={() => void undoBulk()}>
+                  {copy.lists.undoBulk}
+                </Button>
+              </>
+            ) : null}
           </p>
         </>
       )}
+      {outcome && !blocked ? (
+        <Alert tone="danger" title={outcome.title} live="alert">
+          {outcome.problem !== undefined ? (
+            <ProblemMessage problem={outcome.problem} />
+          ) : (
+            <ul className={styles.failedList}>
+              {outcome.failed.map((f) => (
+                <li key={f.key}>{`${labelForKey(f.key)}: ${f.reason}`}</li>
+              ))}
+            </ul>
+          )}
+        </Alert>
+      ) : null}
       {blocked ? (
         <Alert tone="danger" title={copy.lists.forbidden(noun)} live="alert">
           {copy.lists.forbiddenBody}
@@ -494,6 +653,11 @@ export function ListPage<T>({
           sort={query.sort}
           onSortChange={cycleSort}
           sortDescribedBy={sortNote ? sortNoteId : undefined}
+          selection={
+            selectable
+              ? { selected: chosenKeys, onToggle: toggleRow, onToggleAll: toggleAll, label: (row, index) => copy.lists.selectRow(labelOf(row, index)), allLabel: copy.lists.selectAll }
+              : undefined
+          }
         />
       ) : !blocked && !failed ? (
         searching && loadedRowsShown.length > 0 ? (
@@ -518,6 +682,19 @@ export function ListPage<T>({
             {copy.lists.loadMore(noun)}
           </Button>
         </div>
+      ) : null}
+      {confirming?.confirm ? (
+        <ConfirmDialog {...confirming.confirm} cancelLabel={copy.lists.cancel} onConfirm={() => startBulk(confirming)} onCancel={() => setConfirming(null)} />
+      ) : null}
+      {pasting && paste && !blocked ? (
+        <PasteDialog
+          fields={paste.fields}
+          onClose={() => setPasting(false)}
+          onApply={(pasted) => {
+            setPasting(false);
+            void runBulk(() => paste.onCommit(pasted), paste.undo, false);
+          }}
+        />
       ) : null}
       {footer}
     </div>

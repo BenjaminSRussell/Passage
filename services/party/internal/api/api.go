@@ -55,6 +55,7 @@ type API struct {
 	suppliers store.SupplierStore
 	portal    store.PortalStore
 	setup     store.SetupStore
+	terms     store.TermStore
 	merges    MergeStore
 	taxRegs   store.TaxRegistrationStore
 	search    store.SearchStore
@@ -128,6 +129,9 @@ func (a *API) Register(r chi.Router) {
 	}
 	if a.setup != nil {
 		a.registerSetup(r)
+	}
+	if a.terms != nil {
+		a.registerTerms(r)
 	}
 	if a.portal != nil {
 		a.registerPortal(r)

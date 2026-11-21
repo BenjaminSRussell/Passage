@@ -123,3 +123,13 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+.selectCell {
+  inline-size: 1%;
+  text-align: center;
+}
+
+.selectedRow,
+.selectedRow:nth-child(even) {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}

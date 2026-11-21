@@ -162,7 +162,7 @@ Backend (stage 5 issues; this slice cannot be declared done without them):
 
 ### Slice 10. Keyboard line grid (L, P)
 
-- `shell/ui/LineGrid.tsx` with the keymap of UXS-05 (no Insert, no Ctrl+D, row actions on Shift+F10) and its denylist test.
+- `shell/ui/LineGrid.tsx` with the keymap of UXS-05 (no Insert, no Ctrl+D, row actions on Shift+F10) and its denylist test. Delivered for the component (`shell/ui/LineGrid.tsx`, `LineGrid.test.tsx`); the page rollout below is still to do.
 - Apply in this order: AP invoice (AP1), receipt (WH1), sales order (SR1), PO (BU1), journal batch (CT1), requisition, free-text invoice, transfer order, BOM lines (MD5).
 - Extend `e2e/p2p-keyboard.demo.spec.ts`.
 - **Done when:** the listed pages render `LineGrid`; AP1, WH1, SR1, BU1, CT1 and MD5 are within budget; a manual assistive-technology pass on the grid (NVDA, JAWS, VoiceOver, keyboard only, 400% zoom) has no open blocker.

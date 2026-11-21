@@ -23,6 +23,7 @@ const (
 	DueDateEvent     = "EVENT"
 	DueDateDefaulted = "DEFAULTED"
 	DueDateOpening   = "OPENING"
+	DueDateTerms     = "TERMS"
 	defaultLimit     = 100
 	maxLimit         = 500
 )

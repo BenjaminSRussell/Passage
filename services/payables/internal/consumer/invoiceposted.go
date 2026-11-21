@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"time"
 
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/depot/platform/events"
+	"github.com/BenjaminSRussell/depot/platform/money"
 	"github.com/BenjaminSRussell/depot/platform/tenant"
+	"github.com/BenjaminSRussell/depot/services/payables/internal/party"
 	"github.com/BenjaminSRussell/depot/services/payables/internal/store"
 )
 
@@ -39,11 +42,20 @@ type invoicePosted struct {
 	DueDate         string  `json:"due_date"`
 	DiscountDate    *string `json:"discount_date"`
 	DiscountAmt     string  `json:"discount_amount"`
+	PaymentTermID   string  `json:"payment_term_id"`
 	Currency        string  `json:"currency"`
 	Total           string  `json:"total"`
 }
 
+type TermResolver interface {
+	TermDates(ctx context.Context, legalEntityID, termID, documentDate string) (party.TermDates, error)
+}
+
 func HandleInvoicePosted(ctx context.Context, items *store.Postgres, evt events.Event) error {
+	return HandleInvoicePostedWithTerms(ctx, items, nil, evt)
+}
+
+func HandleInvoicePostedWithTerms(ctx context.Context, items *store.Postgres, terms TermResolver, evt events.Event) error {
 	if evt.Type != InvoicePostedType {
 		return fmt.Errorf("%w: type %q", ErrInvalidEvent, evt.Type)
 	}
@@ -58,6 +70,9 @@ func HandleInvoicePosted(ctx context.Context, items *store.Postgres, evt events.
 	}
 	if d.VendorGroupID != "" && !uuidPattern.MatchString(d.VendorGroupID) {
 		return fmt.Errorf("%w: vendor_group_id %q is not a uuid", ErrInvalidEvent, d.VendorGroupID)
+	}
+	if d.PaymentTermID != "" && !uuidPattern.MatchString(d.PaymentTermID) {
+		return fmt.Errorf("%w: payment_term_id %q is not a uuid", ErrInvalidEvent, d.PaymentTermID)
 	}
 	if d.VendorGroupCode != "" && !groupCodePattern.MatchString(d.VendorGroupCode) {
 		return fmt.Errorf("%w: vendor_group_code %q", ErrInvalidEvent, d.VendorGroupCode)
@@ -86,16 +101,35 @@ func HandleInvoicePosted(ctx context.Context, items *store.Postgres, evt events.
 			return fmt.Errorf("%w: discount_date %q", ErrInvalidEvent, *d.DiscountDate)
 		}
 	}
+	ctx = tenant.With(ctx, tenant.Principal{TenantID: evt.TenantID, LegalEntityID: d.LegalEntityID, UserID: "system:invoice.posted"})
 	due, dueSource := d.DueDate, store.DueDateEvent
 	if due == "" {
 		due, dueSource = d.InvoiceDate, store.DueDateDefaulted
+		if d.PaymentTermID != "" && terms != nil {
+			if _, err := time.Parse(time.DateOnly, d.InvoiceDate); err != nil {
+				return fmt.Errorf("%w: date %q", ErrInvalidEvent, d.InvoiceDate)
+			}
+			dates, err := terms.TermDates(ctx, d.LegalEntityID, d.PaymentTermID, d.InvoiceDate)
+			if err != nil {
+				slog.ErrorContext(ctx, "payment term unresolved, invoice.posted will be retried", "err", err, "termId", d.PaymentTermID, "invoiceId", d.InvoiceID)
+				return fmt.Errorf("resolve payment term %s: %w", d.PaymentTermID, err)
+			}
+			due, dueSource = dates.DueDate, store.DueDateTerms
+			if d.DiscountDate == nil && len(dates.Discounts) > 0 {
+				tier := dates.Discounts[0]
+				if _, err := time.Parse(time.DateOnly, tier.Date); err != nil {
+					return fmt.Errorf("%w: discount date %q from the payment term", ErrInvalidEvent, tier.Date)
+				}
+				d.DiscountDate = &tier.Date
+				discount = money.Amount{Value: total, Currency: d.Currency}.Mul(tier.Percent.Div(decimal.NewFromInt(100))).Value
+			}
+		}
 	}
 	for _, day := range []string{d.InvoiceDate, due} {
 		if _, err := time.Parse(time.DateOnly, day); err != nil {
 			return fmt.Errorf("%w: date %q", ErrInvalidEvent, day)
 		}
 	}
-	ctx = tenant.With(ctx, tenant.Principal{TenantID: evt.TenantID, LegalEntityID: d.LegalEntityID, UserID: "system:invoice.posted"})
 	_, _, err = items.CreateFromInvoice(ctx, store.OpenItem{
 		LegalEntityID: d.LegalEntityID, VendorID: d.VendorID, VendorGroupID: d.VendorGroupID, VendorGroupCode: d.VendorGroupCode, SourceInvoiceID: d.InvoiceID, InvoiceNumber: d.InvoiceNumber,
 		InvoiceDate: d.InvoiceDate, DueDate: due, DueDateSource: dueSource, Currency: d.Currency, Amount: total, DiscountDate: d.DiscountDate, DiscountAmount: discount,

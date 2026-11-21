@@ -1187,6 +1187,8 @@
       {"resource": "/v1/service/activities/*:reschedule", "methods": ["POST"]},
       {"resource": "/v1/service/activities:calendar", "methods": ["GET"]}
     ]},
+    "agents.sensitive-payroll.view": {"flag": true, "permissions": []},
+    "agents.sensitive-worker.view": {"flag": true, "permissions": []},
     "agents.admin": {"tenant_level": true, "permissions": [
       {"resource": "/api/v1/agents/*/versions/*/promote", "methods": ["PUT"]},
       {"resource": "/api/v1/agents/budgets/*", "methods": ["GET"]},

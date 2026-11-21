@@ -104,6 +104,13 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 // Ping checks the database connection for readiness.
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
+func singleLegalEntity(p tenant.Principal) string {
+	if scopes := tenant.LegalEntityScopeList(p); len(scopes) == 1 {
+		return scopes[0]
+	}
+	return ""
+}
+
 func enqueue(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventType, tenantID string, data any) error {
 	evt, err := platevents.New(eventType, eventSource, aggregateID, tenantID, data)
 	if err != nil {

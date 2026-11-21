@@ -1,7 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
+import { DEV_IDENTITY, OPERATOR, PERSONAS, personaNames } from "./e2e/guardrails/personas";
 
 // No @types/node in this package; declare only what the config reads.
-declare const process: { env: Record<string, string | undefined> };
+declare const process: { env: Record<string, string | undefined>; argv: string[] };
+
+// Workers re-read this file; the environment, unlike argv, reaches them.
+const GUARDRAILS = process.env.DEPOT_GUARDRAILS === "1" || process.argv.some((arg) => arg.includes("guardrails"));
+if (GUARDRAILS) process.env.DEPOT_GUARDRAILS = "1";
 
 const PORT = 4173;
 const DEMO_PORT = 4174;
@@ -57,18 +62,48 @@ const E2E_DUTIES = [
   "warehouse.mobile-flow.admin",
 ].join(",");
 
-const DEV_IDENTITY = "00000000-0000-0000-0000-000000000001.dev";
-const ONBOARDING_COMPLETED = {
+const onboardingCompletedOn = (port: number) => ({
   cookies: [],
-  origins: [{ origin: `http://localhost:${PORT}`, localStorage: [{ name: `depot.onboarding.v1.${DEV_IDENTITY}`, value: "completed" }] }],
-};
+  origins: [{ origin: `http://localhost:${port}`, localStorage: [{ name: `depot.onboarding.v1.${DEV_IDENTITY}`, value: "completed" }] }],
+});
+const ONBOARDING_COMPLETED = onboardingCompletedOn(PORT);
+
+const guardrailServer = (port: number, duties: string) => ({
+  command: `npx vite --port ${port} --strictPort`,
+  url: `http://localhost:${port}`,
+  env: { DEPOT_DEV_DUTIES: duties, DEPOT_DEV_SHOW_ALL_NAV: "" },
+  reuseExistingServer: !process.env.CI,
+  timeout: 60_000,
+});
+
+const guardrailProjects = [
+  {
+    name: "guardrails",
+    use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${OPERATOR.port}`, storageState: onboardingCompletedOn(OPERATOR.port) },
+    testMatch: /guardrails\/.*\.spec\.ts/,
+    testIgnore: /guardrails\/permissions\.spec/,
+    retries: 0,
+  },
+  ...personaNames.map((persona) => ({
+    name: `guardrails-${persona}`,
+    use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${PERSONAS[persona].port}`, storageState: onboardingCompletedOn(PERSONAS[persona].port) },
+    testMatch: /guardrails\/permissions\.spec/,
+    metadata: { persona },
+    retries: 0,
+  })),
+];
+
+const guardrailServers = [
+  guardrailServer(OPERATOR.port, [E2E_DUTIES, ...OPERATOR.extraDuties].join(",")),
+  ...personaNames.map((persona) => guardrailServer(PERSONAS[persona].port, PERSONAS[persona].duties.join(","))),
+];
 
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: [["list"], ["html", { open: "never" }]],
+  reporter: [["list"], ["html", { open: "never" }], ...(GUARDRAILS ? [["json", { outputFile: "test-results/guardrails/results.json" }] as const] : [])],
   use: {
     baseURL: `http://localhost:${PORT}`,
     trace: "on-first-retry",
@@ -79,7 +114,7 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ONBOARDING_COMPLETED },
-      testIgnore: [/warehouse-mobile/, /\.demo\.spec/],
+      testIgnore: [/warehouse-mobile/, /\.demo\.spec/, /guardrails\//],
     },
     // Procure-to-pay and order-to-cash flows run against the demo build: a fake backend and every duty held.
     { name: "demo-flows", use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${DEMO_PORT}/Depot/` }, testMatch: /\.demo\.spec/ },
@@ -89,6 +124,7 @@ export default defineConfig({
       testMatch: /a11y-routes\.demo\.spec/,
     },
     { name: "warehouse-mobile", use: { ...devices["Pixel 5"] }, testMatch: /warehouse-mobile/ },
+    ...(GUARDRAILS ? guardrailProjects : []),
   ],
   webServer: [
     {
@@ -104,5 +140,6 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
+    ...(GUARDRAILS ? guardrailServers : []),
   ],
 });

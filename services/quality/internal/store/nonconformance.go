@@ -111,9 +111,11 @@ func insertNCR(ctx context.Context, tx pgx.Tx, tenantID string, n domain.Nonconf
 	if err != nil {
 		return out, err
 	}
+	p, _ := tenant.FromContext(ctx)
 	return out, enqueue(ctx, tx, "nonconformance", out.ID, qevents.NonconformanceCreated, tenantID, qevents.NonconformanceCreatedData{
 		NCRID: out.ID, Source: out.Source, Severity: out.Severity, ProblemType: out.ProblemType, ItemID: out.ItemID,
 		VendorID: out.VendorID, CustomerID: out.CustomerID, Qty: out.Qty.String(), UOM: out.UOM, QualityOrderID: out.QualityOrderID,
+		LegalEntityID: singleLegalEntity(p),
 	})
 }
 

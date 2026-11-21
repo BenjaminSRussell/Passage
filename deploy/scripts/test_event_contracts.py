@@ -112,7 +112,11 @@ RMA_WHY = ("the return-order transition picks its event type at run time (rmaEve
            "events, which no consumer reads")
 ACK_WHY = ("the acknowledgement picks its type at run time (ackEventType(outcome)); it writes only poack events, which no "
            "consumer reads")
+ECR_CALL = 'emit(ctx, tx, p, e.ID, typ, aggregateEcr, e.ID, e.EventData())'
+ECR_WHY = ("the ECR transition picks its event type from the new state at run time (a map lookup in SaveEcr); it writes only "
+           "ecr events, which no consumer reads (workflow-ts reads the eco events)")
 UNRESOLVED_EMITS = {
+    (STORE.format("engineering", "store"), STORE.format("engineering", "ecr"), "SaveEcr", ECR_CALL): ECR_WHY,
     (STORE.format("sales", "store"), STORE.format("sales", "rma"), "moveReturn", RMA_CALL): RMA_WHY,
     (STORE.format("purchasing", "store"), STORE.format("purchasing", "po_ack"), "AcknowledgePurchaseOrder", ACK_CALL): ACK_WHY,
 }

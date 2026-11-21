@@ -1,0 +1,33 @@
+{
+  "outcomes": [
+    { "id": "O1", "title": "Opening Depot shows the natural-language prompt as the dominant element on the landing page; the workspace section grid is no longer the primary content, and every workspace/module remains reachable from the home in no more clicks than a secondary navigation path." },
+    { "id": "O2", "title": "The home shows a prioritized feed containing approvals, exceptions, tasks, agent proposals awaiting approval and anomalies relevant to the signed-in user; items can be acted on from the feed, with one-click actions offered only where the action is safe, and anything else opens the item for review." },
+    { "id": "O3", "title": "A user can ask a plain-language question about business data and receive an answer that cites its sources and lets them drill through to the underlying records, using the existing read-only copilot; answers never include data the user is not permitted to see." },
+    { "id": "O4", "title": "A user can state a task in plain language and the assistant navigates to the right place, pre-fills the form, or proposes an action; any action that posts or touches money is not executed until the user explicitly approves it under approve_before_commit; the user can decline or edit the proposal." },
+    { "id": "O5", "title": "A keyboard shortcut opens a global command bar on every page; from it a user can search navigation, look up records, and send an assistant prompt, and it is fully operable by keyboard and screen reader." },
+    { "id": "O6", "title": "On module pages a user can invoke explain this record, what changed, and what should I do next, and receive an answer grounded in that record's data and history." },
+    { "id": "O7", "title": "Users receive a briefing (e.g. daily) summarizing changes, risks and recommended actions drawn from ap_coding, cash_application, mrp_triage, collections_outreach and journal_anomaly output; recommended actions link into the governed approval flow." },
+    { "id": "O8", "title": "Each AI suggestion shows why it was made and what data it used; users can undo (where reversible) or decline it; admins can use the kill switch and set budgets; when AI is down, killed or budget-stopped, the home and navigation fall back to the classic experience and every ERP process can still be completed manually." },
+    { "id": "O9", "title": "The home content and ordering differ by user role/duties and recent activity, and users can pin items that persist across sessions." },
+    { "id": "O10", "title": "A first-time user sees an onboarding introduction to the AI-first experience that can be skipped and revisited later." }
+  ],
+  "paths": [
+    { "id": "ask", "status": "present", "outcomes": ["O3"] },
+    { "id": "navigate", "status": "present", "outcomes": ["O1", "O4"] },
+    { "id": "attention-feed", "status": "present", "outcomes": ["O2", "O9"] },
+    { "id": "act-proposal-view", "status": "present", "outcomes": ["O4", "O7"] },
+    { "id": "contextual-help", "status": "present", "outcomes": ["O6"] },
+    { "id": "briefing", "status": "present", "outcomes": ["O7"] },
+    { "id": "command-bar", "status": "present", "outcomes": ["O5"] },
+    { "id": "pins", "status": "present", "outcomes": ["O9"] },
+    { "id": "onboarding", "status": "present", "outcomes": ["O10"] },
+    { "id": "admin-controls", "status": "present", "outcomes": ["O8"] },
+    { "id": "auto-daily-briefing", "status": "pending", "ticket": "DEPOT-347", "outcomes": ["O7"] },
+    { "id": "feed-inline-decisions", "status": "pending", "ticket": "DEPOT-346", "outcomes": ["O2"] },
+    { "id": "proposal-start-in-help", "status": "pending", "ticket": "DEPOT-281/DEPOT-282", "outcomes": ["O4", "O6"] },
+    { "id": "proposal-approve-decline", "status": "pending", "ticket": "DEPOT-282", "outcomes": ["O4"] },
+    { "id": "personalization-reset", "status": "pending", "ticket": "DEPOT-348", "outcomes": ["O9"] },
+    { "id": "three-way-match-feed", "status": "pending", "ticket": "DEPOT-342", "outcomes": ["O2"] },
+    { "id": "anomaly-feed", "status": "pending", "ticket": "DEPOT-343", "outcomes": ["O2", "O7"] }
+  ]
+}

@@ -54,7 +54,7 @@ func (f *fakeVendors) ListPartyVendors(_ context.Context, partyID string) ([]dom
 
 func (f *fakeVendors) AddBankAccount(_ context.Context, vendorID string, in domain.NewBankAccount) (domain.BankAccount, error) {
 	f.banked = in
-	return domain.BankAccount{ID: knownID, VendorID: vendorID, AccountHolder: in.AccountHolder, AccountLast4: in.Last4()}, f.err
+	return domain.BankAccount{ID: knownID, VendorID: vendorID, AccountHolder: in.AccountHolder, AccountLast4: in.Last4(), Status: "pending", PendingChangeID: knownID}, f.err
 }
 
 func (f *fakeVendors) ListBankAccounts(_ context.Context, vendorID string, reveal bool) ([]domain.BankAccount, error) {
@@ -128,7 +128,7 @@ func TestVendorRoutes_BankAccountsMaskedUnlessRevealDuty(t *testing.T) {
 	f := &fakeVendors{}
 	r := vendorRouter(f)
 	rec := do(r, http.MethodPost, "/v1/party/vendors/"+knownID+"/bank-accounts", bankBody, "party.vendor-bank.write", true)
-	if rec.Code != http.StatusCreated || strings.Contains(rec.Body.String(), "DE89") || !strings.Contains(rec.Body.String(), `"accountLast4":"3000"`) || f.banked.AccountNumber != "DE89370400440532013000" || f.banked.BankCountry != "DE" {
+	if rec.Code != http.StatusAccepted || strings.Contains(rec.Body.String(), "DE89") || !strings.Contains(rec.Body.String(), `"accountLast4":"3000"`) || !strings.Contains(rec.Body.String(), `"status":"pending"`) || !strings.Contains(rec.Body.String(), `"pendingChangeId":"`+knownID+`"`) || f.banked.AccountNumber != "DE89370400440532013000" || f.banked.BankCountry != "DE" {
 		t.Fatalf("add: %d %s %+v", rec.Code, rec.Body, f.banked)
 	}
 	rec = do(r, http.MethodGet, "/v1/party/vendors/"+knownID+"/bank-accounts", "", "party.read", true)

@@ -39,6 +39,7 @@ describe("worker activity registry", () => {
         "generatePaymentFile",
         "getTender",
         "postPaymentJournal",
+        "readNonconformance",
         "rejectEco",
         "rejectPlan",
         "releaseEco",

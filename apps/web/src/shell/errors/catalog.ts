@@ -812,6 +812,10 @@ const ledgerPostingGaps: Record<string, ProblemCatalogEntry> = {
 
 const party: Record<string, ProblemCatalogEntry> = {
   "PTY-0001": { message: "The tax registration number isn't valid for its country.", action: "Check the number and the country, then try again." },
+  "PTY-TERM-EXISTS": { message: "A payment term with that code already exists.", action: "Pick a different code, or open the existing term." },
+  "PTY-TERM-INVALID": { message: "Some of the payment term's details aren't valid.", action: "Check the highlighted fields, then try again." },
+  "PTY-CALENDAR-EXISTS": { message: "A payment calendar with that code already exists.", action: "Pick a different code, or open the existing calendar." },
+  "PTY-CALENDAR-INVALID": { message: "Some of the payment calendar's details aren't valid.", action: "Check the weekend days, the shift rule and the holiday dates, then try again." },
   "PTY-SUP-INVALID": { message: "Some of the details aren't valid.", action: "Check the highlighted fields, then try again." },
   "PTY-SUP-NOT-FOUND": { message: "That request, document or supplier can't be found.", action: "Reload the list and try again." },
   "PTY-SUP-PARTY-WRITE": { message: "Approving this profile change updates the supplier's party record, which you aren't allowed to edit.", action: "Ask someone who can edit parties to approve it, or reject it with a note." },

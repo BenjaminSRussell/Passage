@@ -245,6 +245,74 @@ describe("CAPA workflow", () => {
     expect(fake.effects.corrections).toBe(0);
   }, 60_000);
 
+  describe("awaiting NCR approval", () => {
+    const waiting = { awaitApproval: true };
+
+    it("reads the NCR until it is approved, then starts the correction once", async () => {
+      const fake = new FakeQuality();
+      fake.ncr.status = "NEW";
+      fake.after("read", async () => {
+        if (fake.calls.read === 3) fake.ncr.status = "APPROVED";
+      });
+      const result = await run(
+        fake,
+        async (handle) => {
+          await until(handle, (state) => state.status === "awaiting_approval");
+          await environment.sleep(10 * 60_000);
+          await until(handle, (state) => state.status === "in_correction");
+        },
+        waiting,
+      );
+      expect(fake.calls.read).toBeGreaterThanOrEqual(3);
+      expect(fake.effects.corrections).toBe(1);
+      expect(result.status).toBe("stalled");
+    }, 60_000);
+
+    it("ends not_started, with no start call, when the NCR is refused", async () => {
+      const fake = new FakeQuality();
+      fake.ncr.status = "REFUSED";
+      const result = await run(fake, async () => {}, waiting);
+      expect(result).toMatchObject({ status: "not_started", outcome: expect.stringContaining("REFUSED") });
+      expect(fake.calls.start).toBe(0);
+    }, 60_000);
+
+    it("gives up when the NCR is not approved within the waiting period and never starts a correction", async () => {
+      const fake = new FakeQuality();
+      fake.ncr.status = "NEW";
+      const before = await environment.currentTimeMs();
+      const result = await run(fake, async () => {}, { ...waiting, approvalGiveUpMs: 3 * 60 * 60_000 });
+      expect(result).toMatchObject({ status: "not_started", outcome: expect.stringContaining("waiting period") });
+      expect(fake.calls.start).toBe(0);
+      expect((await environment.currentTimeMs()) - before).toBeGreaterThanOrEqual(3 * 60 * 60_000);
+    }, 60_000);
+
+    it("ends not_started when the NCR cannot be read", async () => {
+      const fake = new FakeQuality();
+      fake.refuse("read", 404, "QM-0170");
+      const result = await run(fake, async () => {}, waiting);
+      expect(result).toMatchObject({ status: "not_started", outcome: expect.stringContaining("could not be read") });
+      expect(fake.calls.start).toBe(0);
+    }, 60_000);
+
+    it("keeps waiting through a transient read outage and starts once the NCR is approved", async () => {
+      const fake = new FakeQuality();
+      fake.ncr.status = "NEW";
+      fake.refuse("read", 503, "QM-0503", 100);
+      fake.after("read", async () => {
+        if (fake.calls.read > 100) fake.ncr.status = "APPROVED";
+      });
+      await run(
+        fake,
+        async (handle) => {
+          await environment.sleep(3 * 60 * 60_000);
+          await until(handle, (state) => state.status !== "awaiting_approval");
+        },
+        waiting,
+      );
+      expect(fake.effects.corrections).toBe(1);
+    }, 120_000);
+  });
+
   it("reports its state to a query", async () => {
     const fake = new FakeQuality();
     let seen: unknown;

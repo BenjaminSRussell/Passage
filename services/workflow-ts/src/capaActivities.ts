@@ -4,6 +4,7 @@ import { callFailure, mintOrReject } from "./serviceCall.js";
 import type { ServiceTokenSigner } from "./serviceToken.js";
 
 export interface CapaActivities {
+  readNonconformance(ref: CapaRef): Promise<CapaNcr>;
   startCorrection(ref: CapaRef & { effectivenessCheckDays?: number }): Promise<CapaNcr>;
   completeStep(ref: CapaRef & { step: number; notes: string }): Promise<CapaNcr>;
   checkEffectiveness(ref: CapaRef & { result: EffectivenessResult; note: string }): Promise<CapaNcr>;
@@ -38,6 +39,9 @@ export function createCapaActivities(baseUrl: string, signer: ServiceTokenSigner
   }
 
   return {
+    async readNonconformance(ref) {
+      return (await load(ref)).ncr;
+    },
     async startCorrection(ref) {
       const { ncr, ifMatch } = await load(ref);
       if (ncr.correction) return ncr;

@@ -1,6 +1,8 @@
 # workflow-ts consumes transport's load.released and tender outcomes to start and signal tenderWorkflow (#426), and
-# budgeting's plan.submitted to start budgetPlanWorkflow (#38). The topics are created by the outbox-transport and
-# outbox-budgeting connectors (deploy/kafka/connect.yaml); a refused event goes to the one dead-letter topic below.
+# budgeting's plan.submitted to start budgetPlanWorkflow (#38), and, only while WORKFLOW_ECO_CAPA_TRIGGERS is "true",
+# engineering's eco.submitted and quality's nonconformance.created to start ecoApprovalWorkflow and capaWorkflow (B-40a).
+# The topics are created by the outbox-transport, outbox-budgeting, outbox-engineering and outbox-quality connectors
+# (deploy/kafka/connect.yaml); a refused event goes to the one dead-letter topic below.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
@@ -19,6 +21,10 @@ spec:
       - resource: {type: topic, name: depot.tms.tender, patternType: literal}
         operations: [Read, Describe]
       - resource: {type: topic, name: depot.budget.plan, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: depot.engineering.eco, patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: topic, name: depot.quality.nonconformance, patternType: literal}
         operations: [Read, Describe]
       - resource: {type: topic, name: depot.workflow.tender.dlq, patternType: literal}
         operations: [Write, Describe]

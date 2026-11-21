@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { Pseudonymizer } from "../src/domain/redaction.js";
+import { Pseudonymizer, SENSITIVE_DUTY } from "../src/domain/redaction.js";
 import type { GuardContext } from "../src/runtime/egressGuard.js";
 import { createChunkReleaser, createOutputGuard, stripUnreadableCitations, UNVERIFIED_MARK, type OutputInput } from "../src/runtime/outputGuard.js";
 
 const IBAN = "DE89370400440532013000";
-const HOLDER = new Set(["ViewSensitivePayroll"]);
+const HOLDER = new Set([SENSITIVE_DUTY.payroll]);
 
 function turn(over: Partial<OutputInput> = {}, context: Partial<GuardContext> = {}): OutputInput {
   const pseudo = new Pseudonymizer("t", 60_000, () => 0);

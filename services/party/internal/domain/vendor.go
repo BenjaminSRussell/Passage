@@ -43,14 +43,16 @@ type NewVendor struct {
 }
 
 type BankAccount struct {
-	ID            string `json:"id"`
-	VendorID      string `json:"vendorId"`
-	AccountHolder string `json:"accountHolder"`
-	BankCountry   string `json:"bankCountry"`
-	CurrencyCode  string `json:"currencyCode"`
-	AccountLast4  string `json:"accountLast4"`
-	AccountNumber string `json:"accountNumber,omitempty"`
-	RoutingNumber string `json:"routingNumber,omitempty"`
+	ID              string `json:"id"`
+	VendorID        string `json:"vendorId"`
+	AccountHolder   string `json:"accountHolder"`
+	BankCountry     string `json:"bankCountry"`
+	CurrencyCode    string `json:"currencyCode"`
+	AccountLast4    string `json:"accountLast4"`
+	Status          string `json:"status"`
+	AccountNumber   string `json:"accountNumber,omitempty"`
+	RoutingNumber   string `json:"routingNumber,omitempty"`
+	PendingChangeID string `json:"pendingChangeId,omitempty"`
 }
 
 type NewBankAccount struct {

@@ -15,7 +15,7 @@ const openItemSchema = z.object({
   invoiceNumber: z.string(),
   invoiceDate: z.string(),
   dueDate: z.string(),
-  dueDateSource: z.enum(["EVENT", "DEFAULTED"]).optional(),
+  dueDateSource: z.enum(["EVENT", "DEFAULTED", "TERMS"]).optional(),
   currency: z.string(),
   amount: z.string(),
   openAmount: z.string(),
