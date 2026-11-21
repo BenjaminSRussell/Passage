@@ -27,8 +27,8 @@ const (
 	MaxReasonLen        = 500
 	stewardColumns      = `id::text, party_id::text, legal_entity_id::text, role, candidates, override_reason, status, coalesce(resolution, ''), coalesce(resolution_reason, ''), requested_by, coalesce(resolved_by, ''), created_at, resolved_at`
 	partyRecordColumns  = `p.id::text, p.party_number, p.party_type, p.name, coalesce(p.org_registration_number, ''), ` +
-		`coalesce((select min(a.normalized) from party_electronic_address a where a.tenant_id = p.tenant_id and a.party_id = p.id and a.kind = 'email'), ''), ` +
-		`coalesce((select min(a.normalized) from party_electronic_address a where a.tenant_id = p.tenant_id and a.party_id = p.id and a.kind = 'phone'), '')`
+		`coalesce((select array_agg(a.normalized) from party_electronic_address a where a.tenant_id = p.tenant_id and a.party_id = p.id and a.kind = 'email'), '{}'), ` +
+		`coalesce((select array_agg(a.normalized) from party_electronic_address a where a.tenant_id = p.tenant_id and a.party_id = p.id and a.kind = 'phone'), '{}')`
 )
 
 type Candidate struct {
@@ -101,16 +101,11 @@ func (s *Postgres) checkDuplicates(ctx context.Context, tx pgx.Tx, caller tenant
 	var subject domain.PartyRecord
 	var searchName, number string
 	err := tx.QueryRow(ctx, `select `+partyRecordColumns+`, p.search_name from party p where p.tenant_id = $1 and p.id = $2`, caller.TenantID, partyID).
-		Scan(&subject.ID, &number, &subject.Type, &subject.Name, &subject.TaxID, &subject.Email, &subject.Phone, &searchName)
+		Scan(&subject.ID, &number, &subject.Type, &subject.Name, &subject.TaxID, &subject.Emails, &subject.Phones, &searchName)
 	if err != nil {
 		return err
 	}
-	addresses := []string{}
-	for _, a := range []string{subject.Email, subject.Phone} {
-		if a != "" {
-			addresses = append(addresses, a)
-		}
-	}
+	addresses := append(append([]string{}, subject.Emails...), subject.Phones...)
 	rows, err := tx.Query(ctx, `select `+partyRecordColumns+` from party p
 		where p.tenant_id = $1 and p.id <> $2 and p.status <> 'merged' and p.party_type = $3
 		and exists (select 1 from `+role+`_role r where r.tenant_id = p.tenant_id and r.party_id = p.id and r.legal_entity_id = $4)
@@ -126,7 +121,7 @@ func (s *Postgres) checkDuplicates(ctx context.Context, tx pgx.Tx, caller tenant
 	for rows.Next() {
 		var r domain.PartyRecord
 		var c Candidate
-		if err := rows.Scan(&r.ID, &c.PartyNumber, &r.Type, &r.Name, &r.TaxID, &r.Email, &r.Phone); err != nil {
+		if err := rows.Scan(&r.ID, &c.PartyNumber, &r.Type, &r.Name, &r.TaxID, &r.Emails, &r.Phones); err != nil {
 			return err
 		}
 		c.PartyID, c.Name = r.ID, r.Name

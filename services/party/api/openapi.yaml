@@ -1531,8 +1531,15 @@ paths:
         Claims the registration, then creates the party (organization, legal name and registration number from the registration), a
         vendor role blocked until the onboarding is approved by someone other than the accepting buyer, and the onboarding
         questionnaire request. Every step is idempotent on the registration id, so repeating a call that stopped part-way finishes it.
+        409 PTY-DUP-LIKELY, with candidates, when the company matches a vendor in the legal entity; repeat the call with
+        X-Duplicate-Override-Reason to accept it anyway and queue a steward task.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: X-Duplicate-Override-Reason
+          in: header
+          required: false
+          description: Accepts the duplicate candidates and queues a steward task; 1 to 500 characters.
+          schema: { type: string }
       requestBody:
         required: true
         content:

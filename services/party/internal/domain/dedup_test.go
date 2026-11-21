@@ -204,16 +204,16 @@ func TestJaroWinkler(t *testing.T) {
 }
 
 func TestFindCandidates_ElectronicAddressIsABlockingKey(t *testing.T) {
-	subject := domain.PartyRecord{ID: "a", Type: "organization", Name: "Mueller GmbH", Email: "info@mueller.example"}
-	other := domain.PartyRecord{ID: "b", Type: "organization", Name: "Muller GmbH", Email: "info@mueller.example"}
+	subject := domain.PartyRecord{ID: "a", Type: "organization", Name: "Mueller GmbH", Emails: []string{"info@mueller.example"}}
+	other := domain.PartyRecord{ID: "b", Type: "organization", Name: "Muller GmbH", Emails: []string{"a@muller.example", "info@mueller.example"}}
 	if got := domain.FindCandidates([]domain.PartyRecord{other}, subject); len(got) != 1 || got[0].B != "b" {
 		t.Fatalf("shared email: candidates = %+v, want b", got)
 	}
-	other.Email = "sales@muller.example"
+	other.Emails = []string{"sales@muller.example"}
 	if got := domain.FindCandidates([]domain.PartyRecord{other}, subject); len(got) != 0 {
 		t.Fatalf("different email and name prefix: candidates = %+v, want none", got)
 	}
-	subject.Phone, other.Phone = "+49 30 1234567", "0049301234567"
+	subject.Phones = []string{"+49 30 1234567"}
 	if got := domain.BlockKeys(subject); !strings.Contains(strings.Join(got, ","), "p:49301234567") {
 		t.Fatalf("phone key missing: %v", got)
 	}

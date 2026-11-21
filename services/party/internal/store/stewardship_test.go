@@ -141,8 +141,10 @@ func TestElectronicAddress_AddListScopeAndBlockingKey(t *testing.T) {
 	if _, _, err := s.CreateVendorRole(ctxA, plain, vendorRole("V-2", "")); err != nil {
 		t.Fatalf("a similar name with a different prefix and no shared address is not a candidate: %v", err)
 	}
-	if _, err := s.AddElectronicAddress(ctxA, sharing, email); err != nil {
-		t.Fatal(err)
+	for _, in := range []domain.NewElectronicAddress{{Kind: "email", Value: "a@other.example"}, email} {
+		if _, err := s.AddElectronicAddress(ctxA, sharing, in); err != nil {
+			t.Fatal(err)
+		}
 	}
 	_, _, err = s.CreateVendorRole(ctxA, sharing, vendorRole("V-3", ""))
 	dup := duplicateOf(t, err)

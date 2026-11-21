@@ -234,3 +234,54 @@ func TestApproveProfileChange_ThroughTheRouteNeedsPartyWrite(t *testing.T) {
 		t.Fatalf("party after approval: %+v %v", p, err)
 	}
 }
+
+func TestAcceptProspect_ADuplicateVendorNeedsTheOverrideReasonAndTheRetryCompletes(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)}), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	pg := store.New(app)
+	r := httpx.NewRouter()
+	api.New(&stubChecker{}, stubPinger{}, pg, &fakeSequencer{}).WithVendors(pg).WithSuppliers(pg).WithPortal(pg).Register(r)
+	asBuyer := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: portalLE, UserID: "buyer", Duties: testkit.ScopeDuties(portalLE)})
+	name := "Birch Valve Co"
+	existing, _, err := pg.CreateParty(asBuyer, store.NewParty{PartyType: domain.TypeOrganization, Fields: domain.PartyFields{LegalName: &name}, Key: "existing", Hash: "h"}, func(context.Context) (string, error) { return "P-1", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := pg.CreateVendorRole(asBuyer, existing.ID, store.NewVendorRole{In: domain.NewVendor{AccountNumber: "V-1", VendorGroupID: ids.New(), CurrencyCode: "USD"}}); err != nil {
+		t.Fatal(err)
+	}
+	q, err := pg.CreateQuestionnaire(asBuyer, "Basics", []domain.Question{{ID: "iso", Label: "ISO 9001?", Type: domain.QuestionYesNo, Required: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrar := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: portalLE, UserID: "portal-prospect", Service: tenant.VendorPortalIssuer, Duties: map[string]struct{}{tenant.DutyPortalRegister: {}}})
+	if _, err := pg.RegisterProspect(registrar, domain.NewProspect{CompanyName: name, ContactName: "Sam", Email: "sam@birch.example", Country: "US"}); err != nil {
+		t.Fatal(err)
+	}
+	prospects, err := pg.ListProspects(asBuyer, "NEW", 10)
+	if err != nil || len(prospects) != 1 {
+		t.Fatalf("prospects %+v %v", prospects, err)
+	}
+	prospect := prospects[0]
+	body := `{"accountNumber":"V-100","vendorGroupId":"` + ids.New() + `","currencyCode":"USD","questionnaireId":"` + q.ID + `"}`
+	accept := func(reason string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/party/vendor-prospects/"+prospect.ID+":accept", strings.NewReader(body))
+		for k, v := range map[string]string{"X-Depot-Tenant": testkit.TenantID(1), "X-Depot-Legal-Entity": portalLE, "X-Depot-User": "buyer", "X-Depot-Duties": "party.write"} {
+			req.Header.Set(k, v)
+		}
+		if reason != "" {
+			req.Header.Set("X-Duplicate-Override-Reason", reason)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := accept(""); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "PTY-DUP-LIKELY") || !strings.Contains(rec.Body.String(), existing.ID) {
+		t.Fatalf("accept of a duplicate: %d %s", rec.Code, rec.Body)
+	}
+	if rec := accept("different legal entity"); rec.Code != http.StatusOK {
+		t.Fatalf("retry with the override: %d %s", rec.Code, rec.Body)
+	}
+}

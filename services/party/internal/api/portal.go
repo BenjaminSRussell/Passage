@@ -167,6 +167,11 @@ func (a *API) acceptProspect(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, errs)
 		return
 	}
+	reason, err := overrideReason(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
 	prospect, err := a.portal.GetProspect(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		failParty(w, r, err)
@@ -193,7 +198,12 @@ func (a *API) acceptProspect(w http.ResponseWriter, r *http.Request) {
 		failParty(w, r, err)
 		return
 	}
-	vendor, _, err := a.vendors.CreateVendorRole(r.Context(), party.ID, store.NewVendorRole{In: req.NewVendor, Key: key, Hash: domain.RequestHash(req.NewVendor)})
+	vendor, _, err := a.vendors.CreateVendorRole(r.Context(), party.ID, store.NewVendorRole{In: req.NewVendor, Key: key, Hash: domain.RequestHash(req.NewVendor), OverrideReason: reason})
+	if dup, ok := asDuplicate(err); ok {
+		a.dupBlocked.Add(1)
+		failDuplicate(w, r, dup)
+		return
+	}
 	if err != nil {
 		failParty(w, r, err)
 		return
