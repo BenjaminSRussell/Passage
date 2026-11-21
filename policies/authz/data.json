@@ -118,7 +118,7 @@
       {"resource": "/v1/ledger/ledgers/*", "methods": ["GET"]},
       {"resource": "/v1/ledger/charts/*/accounts", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-entries/*", "methods": ["GET"]},
-      {"resource": "/v1/ledger/posting-requests/**", "methods": ["GET"]},
+      {"resource": "/v1/ledger/posting-requests{,/**}", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-entries/*/attachments", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-lines", "methods": ["GET"]},
       {"resource": "/v1/ledger/reason-codes", "methods": ["GET"]},
@@ -179,7 +179,7 @@
     ]},
     "ledger.entry.post": {"service_only": true, "permissions": [
       {"resource": "/v1/ledger/journal-entries", "methods": ["POST"]},
-      {"resource": "/v1/ledger/posting-requests/**", "methods": ["GET"]}
+      {"resource": "/v1/ledger/posting-requests{,/**}", "methods": ["GET"]}
     ]},
     "ledger.entry.validate": {"permissions": [{"resource": "/v1/ledger/validate", "methods": ["POST"]}]},
     "ledger.batch.post": {"permissions": [{"resource": "/v1/ledger/journal-batches/*/post", "methods": ["POST"]}]},
