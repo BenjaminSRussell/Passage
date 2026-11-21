@@ -500,7 +500,7 @@ Phase numbers follow the Document map (Phase 0 = waves 1–5 … Phase 9 = waves
 | `analytics` (supporting) | 9 / 46 | `depot_analytics` (operational only) | none | `analytics-ts` | none | Semantic-layer API facade, dashboards, document designer, catalog/lineage |
 | `agents` (supporting) | 9 / 47 | `depot_agents` (operational only) | none | `agents-ts` (MCP gateway at `/v1/agents/mcp`, copilot API, runs, approvals) | `agents-py` (eval harness); `model-serving-py` in `services/agents-py/` (embedding, reranker, Presidio analyzer, anomaly scorer; wave 47) | Agent registry, prompt registry, runs, approvals, budgets, MCP server |
 | Edge: `web-bff` | 0 / 5 | none (sessions in `depot_platform`) | none | `web-bff` (`services/web-bff-ts`; renamed from `bff-ts`) | none | Cookie session BFF for the shell, GraphQL read gateway |
-| Edge: `device-bff` | 8 / 25 (first user), 32, 45 | none | none | `device-bff` (`services/device-bff-ts`) | none | Device enrollment, worker sessions, offline packets, command sync for shopfloor, warehouse-mobile and technician |
+| Edge: `device-bff` (*Target — not built, ADR-0009*) | 8 / 25 (first user), 32, 45 | none | none | `device-bff` (`services/device-bff-ts`) | none | Device enrollment, worker sessions, offline packets, command sync for shopfloor, warehouse-mobile and technician |
 | Edge: `portal-bff` | 3 / 20 (supplier), 30 (customer) | none | none | `portal-bff` (`services/portal-bff-ts`) | none | Session BFF and persisted-query GraphQL for the supplier and customer portals |
 
 *Designed counts, superseded by ADR-0008:* 15 bounded contexts (12 core + 3 supporting), 10 Go + 15 TS + 6 Python = **31 deployable images** (the original 27 + `manufacturing-ts` + `device-bff` + `portal-bff` + `model-serving-py`; `bff-ts` is `web-bff`). This is the one service inventory; frontend §2, AI §3 and events §9.0 reference it, with owning waves in the "Phase / waves" column. Each TS image has `api` and `worker` (Temporal) entrypoints deployed as separate Deployments from the same image.
@@ -527,7 +527,7 @@ There are no `/bff/...` routes for the web shell or devices (ADR-0009).
 
 | Layer | Path prefix | Served by | Rule |
 |---|---|---|---|
-| BFF | `/bff/...` (`/bff/login`, `/bff/callback`, `/bff/v1/me`, `/bff/v1/permissions`, `/bff/v1/stream`, `/bff/v1/search`; device: `/bff/v1/sync`, `/bff/v1/packets/{kind}`, `/bff/v1/device/*`) | `web-bff`, `device-bff`, `portal-bff` | Cookie session in, bearer token out; never forwarded to services |
+| BFF | `/bff/...` (`/bff/login`, `/bff/callback`, `/bff/v1/me`, `/bff/v1/permissions`, `/bff/v1/stream`, `/bff/v1/search`; device: `/bff/v1/sync`, `/bff/v1/packets/{kind}`, `/bff/v1/device/*`) | `portal-bff` as built (`customer-portal-ts`, `supplier-portal-ts`); `web-bff` and `device-bff` are *Target — not built* (ADR-0009) | Cookie session in, bearer token out; never forwarded to services |
 | Browser/PWA API | `/api/v1/<context>/...` | the BFF | The BFF rewrites `/api/v1/<context>/...` to `/v1/<context>/...` and attaches the bearer token. This records the resolution of the requirements' own `/api/v1` (engineering conventions) vs `/v1` (Appendix D.1) conflict |
 | Edge | `/v1/<context>/...` | Envoy Gateway to the owning service | TLS, JWT, rate limit, coarse route-duty only; also the surface for partners and agents |
 | Service | `/v1/<context>/<collection>` | owning deployable | Section 5; MCP at `/v1/agents/mcp`, copilot at `/v1/agents/copilot/conversations`, kill switch at `/v1/agents/definitions/{id}:disable` and `POST /v1/agents/kill-switch` |
@@ -1240,7 +1240,7 @@ Generated CRUD covers projects, WBS, project resources, hour/expense/item journa
 
 ### 5.20 R. `device-bff` and per-context reconciliation endpoints
 
-`device-bff` (`services/device-bff-ts`, `/bff/...`, see the route table in Section 3.2) serves the offline packets and command replay for shopfloor, warehouse-mobile and technician. Reconciliation endpoints exist in every context that reconciles to the ledger.
+*Target — not built (ADR-0009): `device-bff` has no service directory; devices use `services/mobile` and `services/shopfloor`.* `device-bff` (`services/device-bff-ts`, `/bff/...`, see the route table in Section 3.2) was designed to serve the offline packets and command replay for shopfloor, warehouse-mobile and technician. Reconciliation endpoints exist in every context that reconciles to the ledger.
 
 | Method | Path | Description | Auth Required |
 |---|---|---|---|
@@ -5414,9 +5414,9 @@ Each app is its own Vite build with its own service worker, manifest and nginx i
 
 | App | Path | Wave | Users | Form factor | BFF | Offline | Federation |
 |---|---|---|---|---|---|---|---|
-| Shop-floor kiosk | `apps/shopfloor` | 25 | Machine operators (shared device, badge sign-in) | Wall or arm-mounted touch tablet, 10–15" | device-bff | Yes. 30-minute tolerance target, queue survives reload (§7.6.1). | None (standalone) |
-| Warehouse mobile | `apps/warehouse-mobile` | 32 | Warehouse operators | Android rugged scanner (HID wedge plus camera), 4–6" | device-bff | Yes. 200-transaction offline sync target (§7.6.2). | None. Flows are metadata from the `warehouse` context. |
-| Technician | `apps/technician` | 45 | Field service technicians | Phone or tablet | device-bff | Yes. Work-order packet cached per day (§7.6.3). | None |
+| Shop-floor kiosk | `apps/shopfloor` | 25 | Machine operators (shared device, badge sign-in) | Wall or arm-mounted touch tablet, 10–15" | device-bff (*Target — not built*) | Yes. 30-minute tolerance target, queue survives reload (§7.6.1). | None (standalone) |
+| Warehouse mobile | `apps/warehouse-mobile` | 32 | Warehouse operators | Android rugged scanner (HID wedge plus camera), 4–6" | device-bff (*Target — not built*) | Yes. 200-transaction offline sync target (§7.6.2). | None. Flows are metadata from the `warehouse` context. |
+| Technician | `apps/technician` | 45 | Field service technicians | Phone or tablet | device-bff (*Target — not built*) | Yes. Work-order packet cached per day (§7.6.3). | None |
 | Supplier portal | `apps/supplier-portal` | 20 (extended 35) | External vendor users | Responsive web | portal-bff | No (online only; installable) | None |
 | Customer portal | `apps/customer-portal` | 30 | External customer users | Responsive web | portal-bff | No (online only; installable) | None |
 
@@ -5428,8 +5428,8 @@ The requirements sanction TypeScript BFFs (ADR-0001). The frontend relies on the
 
 | BFF | Serves | Frontend-facing endpoints | Upstream |
 |---|---|---|---|
-| `web-bff` (`services/web-bff-ts`) | `apps/web` | `/bff/login`, `/bff/callback`, `/bff/logout`, `/bff/backchannel-logout`, `GET /bff/v1/me`, `GET /bff/v1/permissions?le=`, `GET /bff/v1/stream` (SSE), `GET /bff/v1/search?q=`, `/api/v1/*` (token relay pass-through) | Keycloak, OPA, Envoy Gateway → services |
-| `device-bff` (`services/device-bff-ts`) | shopfloor, warehouse-mobile, technician | Same session endpoints, plus `POST /bff/v1/device/enroll`, `POST /bff/v1/device/worker-session` (badge + PIN), `POST /bff/v1/sync` (ordered replay of queued commands), `GET /bff/v1/packets/:kind` (offline packets) | Keycloak, OPA, services. Envoy `device` rate class (120 req/min/device, D.7). |
+| `web-bff` (`services/web-bff-ts`), *Target — not built, ADR-0009* | `apps/web` | `/bff/login`, `/bff/callback`, `/bff/logout`, `/bff/backchannel-logout`, `GET /bff/v1/me`, `GET /bff/v1/permissions?le=`, `GET /bff/v1/stream` (SSE), `GET /bff/v1/search?q=`, `/api/v1/*` (token relay pass-through) | Keycloak, OPA, Envoy Gateway → services |
+| `device-bff` (`services/device-bff-ts`), *Target — not built, ADR-0009* | shopfloor, warehouse-mobile, technician | Same session endpoints, plus `POST /bff/v1/device/enroll`, `POST /bff/v1/device/worker-session` (badge + PIN), `POST /bff/v1/sync` (ordered replay of queued commands), `GET /bff/v1/packets/:kind` (offline packets) | Keycloak, OPA, services. Envoy `device` rate class (120 req/min/device, D.7). |
 | `portal-bff` (`services/portal-bff-ts`) | supplier and customer portals | Same session endpoints, `/graphql` (persisted queries only), selected `/api/v1/*` mutations | Keycloak, OPA, GraphQL read model, services |
 
 All browser traffic is same-origin with the serving app's host. The BFF is the only component that attaches `Authorization: Bearer`. Envoy still validates that JWT on every request (§8.3), so a compromised BFF cannot skip gateway checks.
@@ -5758,12 +5758,12 @@ Versions are pinned to the exact patch in the lockfile at wave 5. The version li
 | 3 | `react-router-dom` | 6.x (data router, `RouteObject`) | singleton, eager | Binding (react-router) | Routing |
 | 4 | `@tanstack/react-query` | 5.x | singleton (one `QueryClient`) | Binding | Server state |
 | 5 | `zod` | 3.x | singleton | Binding | Schemas: metadata → zod, API responses |
-| 6 | `@depot/ui` | workspace | singleton, eager | Proposed (wave 5) | Design system |
-| 7 | `@depot/forms` | workspace | singleton | Proposed | Form system |
+| 6 | `@depot/ui` | workspace | singleton, eager | Target — not built (wave 5) | Design system |
+| 7 | `@depot/forms` | workspace | singleton | Target — not built | Form system |
 | 8 | `@depot/api-client` | workspace (generated) | singleton | Requirement D.9 (first-party TS SDK) | API calls |
-| 9 | `@depot/session` | workspace | singleton | Proposed | Session and permissions |
-| 10 | `@depot/i18n` | workspace | singleton | Proposed | Translation and formatting |
-| 11 | `@depot/telemetry` | workspace | singleton | Proposed | Tracing context |
+| 9 | `@depot/session` | workspace | singleton | Target — not built | Session and permissions |
+| 10 | `@depot/i18n` | workspace | singleton | Target — not built | Translation and formatting |
+| 11 | `@depot/telemetry` | workspace | singleton | Target — not built | Tracing context |
 | 12 | `i18next` + `react-i18next` | 23.x / 14.x | singleton | Needs (wave 5) | i18n for 7 country packs and bilingual EN/FR (H) |
 | 13 | `react-aria-components` | 1.x | singleton | Needs (wave 5) | Accessible combobox, grid, dialog, menu and date primitives under `@depot/ui` |
 | 14 | `@tanstack/react-table` + `@tanstack/react-virtual` | 8.x / 3.x | singleton | Needs (wave 5) | Headless grid model and virtualization for EntityGrid and LineGrid |
@@ -6382,13 +6382,13 @@ Each fallback shows the `traceId` from the problem details or the active OTel sp
 | Shell first contentful paint (warm) | < 1.5 s, mid-range laptop | NFR-P11 | Lighthouse CI on every merge to `main` |
 | Shell LCP | < 2.5 s | House standard | Lighthouse CI; web-vitals telemetry p75 |
 | INP | < 200 ms p75 | House standard | web-vitals telemetry |
-| Shell initial JS (React, router, query, `@depot/ui` core, shell) | ≤ 220 KB gzip | Proposed | Bundle-size check in CI (fails over budget) |
-| Per remote entry + first route chunk | ≤ 120 KB gzip | Proposed | Same |
-| `@depot/forms` (lazy on first entity page) | ≤ 150 KB gzip | Proposed | Same |
-| PWA initial JS | ≤ 250 KB gzip; app shell precached | Proposed | Same |
+| Shell initial JS (React, router, query, `@depot/ui` core, shell) | ≤ 220 KB gzip | Target — not built | Bundle-size check in CI (fails over budget) |
+| Per remote entry + first route chunk | ≤ 120 KB gzip | Target — not built | Same |
+| `@depot/forms` (lazy on first entity page) | ≤ 150 KB gzip | Target — not built | Same |
+| PWA initial JS | ≤ 250 KB gzip; app shell precached | Target — not built | Same |
 | Scan-to-acknowledge (PWAs) | ≤ 300 ms | I.1 | Playwright timing on emulated device |
 | Generated read through the BFF | p95 < 50 ms service time (NFR-P2) + BFF overhead ≤ 10 ms p95 | NFR-P2 | k6 smoke via BFF |
-| Lookup type-ahead | Results ≤ 300 ms after debounce, p95 | Proposed | E2E timing |
+| Lookup type-ahead | Results ≤ 300 ms after debounce, p95 | Target — not built | E2E timing |
 
 Techniques:
 

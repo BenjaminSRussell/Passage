@@ -306,7 +306,7 @@ export function createHttpServer(deps: ServerDeps): Server {
   }
 
   /**
-   * An invoice or the statement as a PDF (FR-30.26): the same customer-scoped read the app makes (billing's invoice, receivables'
+   * An invoice or the statement as a PDF (FR-30.14): the same customer-scoped read the app makes (billing's invoice, receivables'
    * statement, for the account in X-Customer), turned into print's document request and rendered by print with the portal's own
    * render duty. Nothing is stored; a refusal of the read (404, 403) is passed on as it came.
    */

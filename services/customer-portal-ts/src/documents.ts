@@ -1,4 +1,4 @@
-// The invoice and statement PDFs (#30, FR-30.26). The BFF reads the document the way the app does (billing's or receivables'
+// The invoice and statement PDFs (#30, FR-30.14). The BFF reads the document the way the app does (billing's or receivables'
 // customer-scoped read) and turns it into print's document request; print renders it (POST /print/v1/documents:render) and stores
 // nothing. These builders are pure: what the customer sees in the PDF is exactly what the read returned.
 

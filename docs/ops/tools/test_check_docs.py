@@ -144,6 +144,51 @@ class TestRepoPaths(unittest.TestCase):
             self.assertEqual(cd.check_repo_paths(root, repo), [])
 
 
+class TestCheckFrTitles(unittest.TestCase):
+    PRD = "- **FR-30.14 Customer portal** — Must. Text.\n- **FR-30.26 Returnable packaging charges** — Could. Text.\n"
+
+    def repo(self, tmp: str, not_implemented: str, prd: str = PRD) -> Path:
+        repo = Path(tmp)
+        write(repo, "docs/prd/phase-5.md", prd)
+        write(repo, "services/receivables/NOT-IMPLEMENTED.md", not_implemented)
+        return repo
+
+    def test_bold_id_with_another_requirements_title_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, "- **FR-30.26 Invoice and statement PDF download.** Built.\n")
+            errors = cd.check_fr_titles(repo)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("FR-30.26", errors[0])
+            self.assertIn("Returnable packaging charges", errors[0])
+
+    def test_matching_title_range_and_code_fence_are_not_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            text = (
+                "- **FR-30.26 Returnable packaging.** Not built.\n"
+                "- **FR-30.14 Customer portal.** Built.\n"
+                "- **FR-30.14 to FR-30.26.** Range.\n"
+                "```\n- **FR-30.26 Wrong title.**\n```\n"
+            )
+            self.assertEqual(cd.check_fr_titles(self.repo(tmp, text)), [])
+
+    def test_id_missing_from_the_prd_is_flagged_in_bold_and_in_a_table_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            text = "- **FR-99.1 Ghost.** Built.\n| Ghost feature (FR-99.2) | built | x |\n"
+            errors = cd.check_fr_titles(self.repo(tmp, text))
+            self.assertEqual(len(errors), 2)
+            self.assertTrue(all("not in the PRD" in e for e in errors))
+
+    def test_empty_prd_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            errors = cd.check_fr_titles(self.repo(tmp, "- **FR-30.14 Customer portal.**\n", prd="no titles here\n"))
+            self.assertEqual(len(errors), 1)
+            self.assertIn("no FR titles found", errors[0])
+
+    def test_missing_prd_directory_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(len(cd.check_fr_titles(Path(tmp))), 1)
+
+
 class TestRepository(unittest.TestCase):
     """Runs the checks against the real docs/ops tree and the real alert rules."""
 
@@ -155,6 +200,9 @@ class TestRepository(unittest.TestCase):
 
     def test_repository_paths_in_docs_exist(self) -> None:
         self.assertEqual(cd.check_repo_paths(OPS, OPS.parents[1]), [])
+
+    def test_not_implemented_fr_ids_match_the_prd(self) -> None:
+        self.assertEqual(cd.check_fr_titles(OPS.parents[1]), [])
 
 
 if __name__ == "__main__":

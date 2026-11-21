@@ -1,6 +1,6 @@
 # customer-portal
 
-Customer-facing portal for wave 30 (DPT-30, issue #30; FR-30.14, FR-30.25), served at `customer.<env>.depot.dev`. A standalone Vite +
+Customer-facing portal for wave 30 (DPT-30, issue #30; FR-30.14), served at `customer.<env>.depot.dev`. A standalone Vite +
 React 19 app (like `apps/supplier-portal`), not a shell module: customers are external users who must never reach the internal
 shell. It talks only to its BFF, `services/customer-portal-ts`. It reads, and makes three writes for the customer itself: an order, a return and a card or bank account payment.
 
