@@ -145,7 +145,7 @@ class TestRepoPaths(unittest.TestCase):
 
 
 class TestCheckFrTitles(unittest.TestCase):
-    PRD = "- **FR-30.14 Customer portal** — Must. Text.\n- **FR-30.26 Returnable packaging charges** — Could. Text.\n"
+    PRD = "- **FR-30.14 Customer portal** — Must. Text.\n- **FR-30.26 Returnable packaging charges** — Could. Text.\n- **FR-30.13 Statements** — Must. Text.\n"
 
     def repo(self, tmp: str, not_implemented: str, prd: str = PRD) -> Path:
         repo = Path(tmp)
@@ -177,6 +177,19 @@ class TestCheckFrTitles(unittest.TestCase):
             errors = cd.check_fr_titles(self.repo(tmp, text))
             self.assertEqual(len(errors), 2)
             self.assertTrue(all("not in the PRD" in e for e in errors))
+
+    def test_table_row_with_another_requirements_title_is_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, "| Invoice and statement PDF download (FR-30.26) | built | x |\n")
+            errors = cd.check_fr_titles(repo)
+            self.assertEqual(len(errors), 1)
+            self.assertIn("FR-30.26", errors[0])
+            self.assertIn("Returnable packaging charges", errors[0])
+
+    def test_table_row_with_matching_title_is_not_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, "| Customer portal order requests (FR-30.14) | built | x |\n")
+            self.assertEqual(cd.check_fr_titles(repo), [])
 
     def test_empty_prd_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

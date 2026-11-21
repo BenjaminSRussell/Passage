@@ -10,7 +10,7 @@ Five checks, all must pass (exit 1 otherwise):
   4. Repository paths: every `services/...` or `apps/...` path written in backticks in prose names a file or
      directory that exists in the repository, so a guide cannot point readers at a service that is not there.
   5. FR titles: an FR id in a NOT-IMPLEMENTED.md (services/*, apps/*, docs/ops) must be in the PRD, and a bold id
-     (`**FR-n.m Title**`) must carry a title that shares a word with the PRD title of that id.
+     (`**FR-n.m Title**`) or a table row (`Title (FR-n.m)`) must not carry the title of another requirement.
 
     python3 docs/ops/tools/check_docs.py [--root docs/ops] [--rules deploy/multi-region/chart/templates/prometheusrule.yaml]
 
@@ -34,7 +34,7 @@ EXTERNAL = ("http://", "https://", "mailto:", "<")
 REPO_PATH_RE = re.compile(r"`((?:services|apps)/[A-Za-z0-9_.\-/]+)`")
 PRD_TITLE_RE = re.compile(r"^\s*- \*\*(FR-\d+\.\d+) (.+?)\*\*")
 BOLD_FR_RE = re.compile(r"\*\*(FR-\d+\.\d+) ([^*]+?)\*\*")
-ROW_FR_RE = re.compile(r"^\|[^|(]*\((FR-\d+\.\d+)[;,):\s]")
+ROW_FR_RE = re.compile(r"^\|([^|(]*)\((FR-\d+\.\d+)[;,):\s]")
 TITLE_STOPWORDS = {"the", "and", "for", "with", "from"}
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -140,6 +140,14 @@ def _stems(text: str) -> set[str]:
     return {w[:5] for w in re.findall(r"[a-z]{4,}", text.lower()) if w not in TITLE_STOPWORDS}
 
 
+def _names_sibling_only(written: str, fr: str, titles: dict[str, str]) -> bool:
+    stems = _stems(written)
+    if stems & _stems(titles[fr]):
+        return False
+    module = fr.split(".")[0] + "."
+    return any(_stems(t) <= stems for other, t in titles.items() if other != fr and other.startswith(module) and _stems(t))
+
+
 def check_fr_titles(repo: Path) -> list[str]:
     titles = prd_titles(repo)
     if not titles:
@@ -158,8 +166,11 @@ def check_fr_titles(repo: Path) -> list[str]:
             row = ROW_FR_RE.match(line)
             if not row:
                 continue
-            if row.group(1) not in titles:
-                errors.append(f"{rel}: {row.group(1)} is not in the PRD")
+            written, fr = row.group(1), row.group(2)
+            if fr not in titles:
+                errors.append(f"{rel}: {fr} is not in the PRD")
+            elif _names_sibling_only(written, fr, titles):
+                errors.append(f"{rel}: {fr} is titled '{written.strip()}' but the PRD title is '{titles[fr]}'")
     return errors
 
 
