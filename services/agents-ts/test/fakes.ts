@@ -44,7 +44,7 @@ export const postDescriptor: ToolDescriptor = { requiredDuty: "APInvoicePost", a
 export const codingDescriptor: ToolDescriptor = { requiredDuty: "APInvoicePost", approvalMode: "suggest" };
 
 export class ScriptedProvider implements ModelProvider {
-  readonly seen: Array<{ system: string; user: string; allowedTools: readonly string[]; maxOutputTokens?: number }> = [];
+  readonly seen: Array<{ system: string; user: string; allowedTools: readonly string[]; maxOutputTokens?: number; answerOnly?: boolean }> = [];
   private readonly responses: ModelResponse[];
 
   constructor(responses: ModelResponse[]) {

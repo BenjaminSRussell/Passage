@@ -219,7 +219,7 @@ func buildLeaseDocs(ctx context.Context, tx pgx.Tx, tenantID string, in LeaseGLP
 	newDoc := func(period int, date time.Time, kind string) *leaseDoc {
 		return &leaseDoc{leaseID: h.id, number: h.number, period: period, placeholder: profile.Placeholder,
 			entry: ledgerclient.Entry{LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, DocumentID: h.id, PostingDate: date.Format(DateLayout), Currency: h.currency,
-				IdempotencyKey: fmt.Sprintf("%s:%s:%d:%s", leaseSource, h.id, period, h.currency), SourceType: leaseSource},
+				IdempotencyKey: ledgerclient.MustPostingKey("assets", leaseSource, h.id, "post", fmt.Sprint(period), h.currency), SourceType: leaseSource},
 			event: assetevents.LeasePostedData{LeaseID: h.id, LegalEntityID: in.LegalEntityID, Kind: kind, Period: period, PostingDate: date.Format(DateLayout), Currency: h.currency}}
 	}
 	if !h.recognized && !h.exempt && !commencement.After(through) {

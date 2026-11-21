@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { PrincipalProvider } from "../../shell/principal";
-import { pageViolations } from "./a11yTest";
+import { pageViolations, panelHeadingSteps } from "./a11yTest";
+import type { Approval } from "./api/proposals";
+import { ProposalCard } from "./ProposalCard";
 import { AiSuggestion } from "./AiSuggestion";
 import { GENERATED_BADGE } from "./domain";
 import { suggestionFixtures, UNRENDERED_MARKER } from "./suggestionFixtures";
@@ -86,6 +88,61 @@ describe("AiSuggestion", () => {
       expect(document.body).not.toHaveTextContent("depot.");
     },
   );
+
+  it.each([
+    ["answer", 4],
+    ["briefing-item", 4],
+    ["proposal", 4],
+    ["feed-item", 3],
+  ] as const)("%s: the Data used panel headings are level %i", async (host, level) => {
+    renderHost(host);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Data used" }));
+    expect(screen.getByRole("heading", { name: "Tools called", level })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Records read", level })).toBeInTheDocument();
+    const otherLevel = level === 3 ? 4 : 3;
+    expect(screen.queryByRole("heading", { name: "Tools called", level: otherLevel })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Records read", level: otherLevel })).toBeNull();
+  });
+
+  it.each([
+    ["answer", 3],
+    ["briefing-item", 3],
+  ] as const)("%s: the panel headings sit one level under a level %i parent heading", async (host, parentLevel) => {
+    const Parent = `h${parentLevel}` as "h3";
+    render(
+      <MemoryRouter>
+        <PrincipalProvider duties={[]}>
+          <Parent>Parent</Parent>
+          <AiSuggestion host={host} suggestion={suggestionFixtures[host].suggestion} />
+        </PrincipalProvider>
+      </MemoryRouter>,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Data used" }));
+    const levels = screen.getAllByRole("heading").map((h) => Number(h.tagName.slice(1)));
+    expect(levels).toEqual([parentLevel, parentLevel + 1, parentLevel + 1]);
+  });
+
+  it("renders the proposal card's panel headings exactly one level under the card title", async () => {
+    const approval: Approval = {
+      runId: "00000000-0000-7000-8000-0000000000d1",
+      actionId: "00000000-0000-7000-8000-00000000a001",
+      tool: "depot.ar.settlement.propose",
+      state: "PENDING",
+      amount: { amount: "1200.50", currency: "USD" },
+      requestedAt: "2026-11-19T10:00:00.000Z",
+      expiresAt: "2026-11-22T10:00:00.000Z",
+    };
+    render(
+      <MemoryRouter>
+        <PrincipalProvider duties={[]}>
+          <ProposalCard approval={approval} />
+        </PrincipalProvider>
+      </MemoryRouter>,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Data used" }));
+    expect(screen.getAllByRole("heading").map((h) => h.tagName)).toEqual(["H3", "H4", "H4"]);
+    expect(panelHeadingSteps()).toEqual([1, 1]);
+  });
 
   it("shows rationale, confidence and the agent version when the trace carries them", async () => {
     renderHost("answer");

@@ -58,7 +58,7 @@ export const ROUTE_CATALOG: readonly CatalogEntry[] = [
 
 export function taskInstruction(): string {
   const screens = ROUTE_CATALOG.map((e) => `${e.routeKey} (${e.label}; params: ${e.params.map((f) => `${f.name} ${f.kind}`).join(", ") || "none"}; draft: ${e.draft.map((f) => `${f.name} ${f.kind}`).join(", ") || "none"})`).join("; ");
-  return `Resolve the user's request to one Depot screen. Call no tool. Never write a URL or a path. Screens: ${screens}. Answer with only this JSON: {"routeKey":"...","params":{...},"draft":{...}} using only the names listed for that screen, or {"clarifyingQuestion":"..."} when no screen fits or a detail is missing.`;
+  return `Resolve the user's request to one Depot screen. If the request is ambiguous and depot.meta.search_tools or depot.help.search is listed as callable, use them to find a screen or its help; call no other tool. Never write a URL or a path. Screens: ${screens}. Answer with only this JSON: {"routeKey":"...","params":{...},"draft":{...}} using only the names listed for that screen, or {"clarifyingQuestion":"..."} when no screen fits or a detail is missing.`;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

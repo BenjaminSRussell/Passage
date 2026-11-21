@@ -95,13 +95,18 @@ func scanBooking(row pgx.Row) (booking, error) {
 	return b, err
 }
 
-func loadBooking(ctx context.Context, tx pgx.Tx, tenantID, key string) (booking, error) {
-	return scanBooking(tx.QueryRow(ctx, `select `+bookingColumns+` from project_gl_booking where tenant_id = $1 and idempotency_key = $2`, tenantID, key))
+func loadBooking(ctx context.Context, tx pgx.Tx, tenantID string, keys ...string) (booking, error) {
+	return scanBooking(tx.QueryRow(ctx, `select `+bookingColumns+` from project_gl_booking where tenant_id = $1 and idempotency_key = any($2::text[])`, tenantID, keys))
 }
 
 // store writes the booking under its idempotency key and returns the row that holds the key, which is the earlier one when
 // another run got there first, so every run resends the same payload.
-func (b booking) store(ctx context.Context, tx pgx.Tx, tenantID string) (booking, error) {
+func (b booking) store(ctx context.Context, tx pgx.Tx, tenantID, legacyKey string) (booking, error) {
+	if old, err := loadBooking(ctx, tx, tenantID, legacyKey); err == nil {
+		return old, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return booking{}, err
+	}
 	if b.lines == nil {
 		b.lines = []domain.GLLine{}
 	}
@@ -275,7 +280,7 @@ func (s *Postgres) planGL(ctx context.Context, in GLPostRequest, res *GLPostResu
 				continue
 			}
 			b, err := booking{kind: domain.GLKindTxn, projectID: r.projectID, legalEntityID: in.LegalEntityID, ledgerID: in.LedgerID, currency: in.Currency, date: r.date,
-				key: fmt.Sprintf("projects:txn:%s:1", r.id), status: statusPending, txnID: &r.id, lines: lines}.store(ctx, tx, p.TenantID)
+				key: ledgerclient.MustPostingKey("projects", "transaction", r.id, "post", "1"), status: statusPending, txnID: &r.id, lines: lines}.store(ctx, tx, p.TenantID, "projects:txn:"+r.id+":1")
 			if err != nil {
 				return err
 			}
@@ -317,8 +322,8 @@ func (s *Postgres) planEstimate(ctx context.Context, in GLPostRequest, pr glProj
 		if _, err := tx.Exec(ctx, `select 1 from project where tenant_id = $1 and id = $2 for update`, p.TenantID, pr.id); err != nil {
 			return err
 		}
-		key := fmt.Sprintf("projects:wip:%s:%s", pr.id, in.Period)
-		if b, err := loadBooking(ctx, tx, p.TenantID, key); err == nil {
+		key := ledgerclient.MustPostingKey("projects", "wip", pr.id, "post", in.Period)
+		if b, err := loadBooking(ctx, tx, p.TenantID, key, "projects:wip:"+pr.id+":"+in.Period); err == nil {
 			if b.status == statusPending {
 				out = &b
 			}
@@ -412,7 +417,7 @@ func (s *Postgres) planEstimate(ctx context.Context, in GLPostRequest, pr glProj
 		if len(lines) == 0 {
 			b.status = statusPosted
 		}
-		stored, err := b.store(ctx, tx, p.TenantID)
+		stored, err := b.store(ctx, tx, p.TenantID, "projects:wip:"+pr.id+":"+in.Period)
 		if err != nil {
 			return err
 		}

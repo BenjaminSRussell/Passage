@@ -314,7 +314,7 @@ func (g *glGroup) entry(in GLPostRequest, profiles []PostingProfile) (ledgerclie
 		}
 	}
 	e := ledgerclient.Entry{LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, DocumentID: g.key, PostingDate: g.txs[0].date, Currency: in.Currency,
-		IdempotencyKey: g.source + ":" + g.key + ":" + in.BookCode + ":" + in.Currency, SourceType: g.source}
+		IdempotencyKey: ledgerclient.MustPostingKey("assets", g.source, g.key, "post", in.BookCode, in.Currency), SourceType: g.source}
 	accounts := make([]string, 0, len(net))
 	for a := range net {
 		accounts = append(accounts, a)

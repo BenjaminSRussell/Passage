@@ -156,6 +156,10 @@ func (s *Postgres) stageVoucher(ctx context.Context, v voucher) (stored voucher,
 	return stored, status, entryID, err
 }
 
+func voucherKey(sourceKey string) string {
+	return ledgerclient.MustPostingKey("costing", "voucher", strings.ReplaceAll(sourceKey, ":", "-"), "post")
+}
+
 func (s *Postgres) markVoucherPosted(ctx context.Context, sourceKey, entryID string) error {
 	t, _ := tenant.FromContext(ctx)
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -269,7 +273,7 @@ func (c ppvCandidate) voucher(p PostingProfile) voucher {
 		lines = domain.InvoiceVoucher(p.accounts(), c.grir, c.ppv)
 	}
 	key := "ctxn:" + c.id
-	return voucher{legalEntityID: "", sourceKey: key, glLedgerID: p.GLLedgerID, currency: c.currency, date: c.date, key: "costing-" + key, lines: lines}
+	return voucher{legalEntityID: "", sourceKey: key, glLedgerID: p.GLLedgerID, currency: c.currency, date: c.date, key: voucherKey(key), lines: lines}
 }
 
 func (s *Postgres) unpostedPPV(ctx context.Context, legalEntityID string) (PostingProfile, []ppvCandidate, int, error) {

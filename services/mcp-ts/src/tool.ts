@@ -1,3 +1,5 @@
+import type { Catalog } from "./catalog.js";
+
 /** Tool model for the Depot MCP gateway (FR-47.1). Pure functions, no I/O. */
 
 export const APPROVAL_MODES = ["none", "suggest", "approve_before_commit"] as const;
@@ -8,13 +10,24 @@ export type HttpMethod = (typeof HTTP_METHODS)[number];
 
 export type JsonObject = Record<string, unknown>;
 
+export interface LocalContext {
+  args: JsonObject;
+  duties: ReadonlySet<string>;
+  catalog: Catalog;
+}
+
+export type LocalHandler = (ctx: LocalContext) => unknown | Promise<unknown>;
+
+export class ToolInputError extends Error {}
+
 export interface ToolDefinition {
   /** depot.<domain>.<entity>.<verb>, e.g. depot.ap.invoice.list */
   name: string;
   description: string;
   version: number;
-  method: HttpMethod;
-  path: string;
+  /** Absent for a local tool, which never reaches the Depot API. */
+  method?: HttpMethod;
+  path?: string;
   /** OpenAPI operationId (or report id). */
   sourceRef: string;
   inputSchema: JsonObject;
@@ -25,6 +38,10 @@ export interface ToolDefinition {
   approvalMode: ApprovalMode;
   readOnly: boolean;
   idempotent: boolean;
+  /** Answered inside the gateway instead of by the Depot API; the caller's token is never forwarded. */
+  local?: LocalHandler;
+  /** Composite tools only: string arguments longer than their schema maxLength (in UTF-16 code units, as the Depot API counts) are refused before the call, and arguments the schema does not declare are dropped. */
+  enforceMaxLength?: boolean;
 }
 
 /**
@@ -46,8 +63,9 @@ export function validateToolDefinition(t: ToolDefinition): string[] {
   const errors: string[] = [];
   if (!TOOL_NAME_PATTERN.test(t.name)) errors.push(`${t.name}: name must match depot.<domain>.<entity>.<verb>`);
   if (!Number.isInteger(t.version) || t.version < 1) errors.push(`${t.name}: version must be a positive integer`);
-  if (!HTTP_METHODS.includes(t.method)) errors.push(`${t.name}: unsupported method ${String(t.method)}`);
-  if (!t.path.startsWith("/")) errors.push(`${t.name}: path must start with /`);
+  if (t.local === undefined && (t.method === undefined || t.path === undefined)) errors.push(`${t.name}: method and path are required unless the tool is local`);
+  if (t.method !== undefined && !HTTP_METHODS.includes(t.method)) errors.push(`${t.name}: unsupported method ${String(t.method)}`);
+  if (t.path !== undefined && !t.path.startsWith("/")) errors.push(`${t.name}: path must start with /`);
   if (!t.sourceRef) errors.push(`${t.name}: sourceRef is required`);
   if (!t.requiredDuty) errors.push(`${t.name}: x-depot-duty is required`);
   if (!APPROVAL_MODES.includes(t.approvalMode)) errors.push(`${t.name}: unknown x-depot-approval`);

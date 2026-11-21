@@ -449,7 +449,7 @@ func (s *Postgres) loadJournal(ctx context.Context, tenantID, id string) (GLJour
 
 func (s *Postgres) postJournalToLedger(ctx context.Context, v GLJournalView, ledgerID string, lines []journalLine) (string, error) {
 	return s.postLedgerEntry(ctx, ledgerEntry{legalEntityID: v.LegalEntityID, ledgerID: ledgerID, documentID: v.DocumentID, postingDate: v.PostingDate,
-		currency: v.Currency, key: fmt.Sprintf("gl-journal:%s:%s", v.LegalEntityID, v.ID), sourceType: "receivables-" + v.SourceType}, lines)
+		currency: v.Currency, key: ledgerclient.MustPostingKey("receivables", "journal", v.ID, "post"), sourceType: "receivables-" + v.SourceType}, lines)
 }
 
 type ledgerEntry struct {

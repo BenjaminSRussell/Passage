@@ -63,15 +63,17 @@ type Line struct {
 }
 
 type Entry struct {
-	LegalEntityID  string
-	LedgerID       string
-	DocumentID     string
-	PostingDate    string
-	Currency       string
-	IdempotencyKey string
-	SourceType     string
-	PostClosed     bool
-	Lines          []Line
+	LegalEntityID      string
+	LedgerID           string
+	DocumentID         string
+	PostingDate        string
+	DocumentDate       string
+	Currency           string
+	IdempotencyKey     string
+	SourceType         string
+	PostClosed         bool
+	Lines              []Line
+	OptionalDimensions []string
 }
 
 type Reversal struct {
@@ -130,7 +132,8 @@ type Error struct {
 	Status int
 	Code   string
 	// Detail is the problem's detail text; the client reads it only to tell an older ledger's refusal of an unknown field.
-	Detail string
+	Detail         string
+	ViolationCodes []string
 }
 
 func (e *Error) Error() string {
@@ -234,6 +237,9 @@ type entryBody struct {
 	PostingDate string     `json:"postingDate"`
 	Source      sourceBody `json:"source"`
 	Lines       []lineBody `json:"lines"`
+
+	DocumentDate       string   `json:"documentDate,omitempty"`
+	OptionalDimensions []string `json:"optionalDimensions,omitempty"`
 }
 
 type reverseBody struct {
@@ -314,12 +320,19 @@ func (c *Client) do(ctx context.Context, op, subject, method, path string, query
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		var problem struct {
-			Code   string `json:"code"`
-			Detail string `json:"detail"`
+			Code       string `json:"code"`
+			Detail     string `json:"detail"`
+			Violations []struct {
+				Code string `json:"code"`
+			} `json:"violations"`
 		}
 		_ = json.Unmarshal(raw, &problem)
 		slog.ErrorContext(ctx, "ledger rejected the request", "op", op, "subject", subject, "status", resp.StatusCode, "code", problem.Code, "correlationId", middleware.GetReqID(ctx))
-		return nil, &Error{Op: op, Status: resp.StatusCode, Code: problem.Code, Detail: problem.Detail}
+		failure := &Error{Op: op, Status: resp.StatusCode, Code: problem.Code, Detail: problem.Detail}
+		for _, v := range problem.Violations {
+			failure.ViolationCodes = append(failure.ViolationCodes, v.Code)
+		}
+		return nil, failure
 	}
 	return raw, nil
 }
@@ -345,7 +358,7 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	body := entryBody{LedgerID: e.LedgerID, DocumentID: e.DocumentID, PostingDate: e.PostingDate,
+	body := entryBody{LedgerID: e.LedgerID, DocumentID: e.DocumentID, PostingDate: e.PostingDate, DocumentDate: e.DocumentDate, OptionalDimensions: e.OptionalDimensions,
 		Source: sourceBody{System: c.source, Type: e.SourceType, ID: e.DocumentID}}
 	for _, l := range e.Lines {
 		side := sideDebit

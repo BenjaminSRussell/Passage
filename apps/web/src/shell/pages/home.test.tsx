@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearHandedOffPrompt, handOffPrompt } from "../assistant/session";
+import { panelHeadingSteps } from "../../modules/copilot/a11yTest";
 import { CopilotHome } from "../../modules/copilot/pages";
 import { loadModules, type DepotModule } from "../../modules/registry";
 import { Shell } from "../Shell";
@@ -332,6 +333,16 @@ describe("role home", () => {
         expect(main().queryByRole("button", { name: /^(Approve|Reject)/ })).not.toBeInTheDocument();
         expect(server.calls.filter((c) => c.url.pathname === APPROVALS)[0].url.search).toBe("?limit=50");
         expect(pageViolations(container)).toEqual([]);
+      });
+
+      it("renders each Data used panel heading one level under the feed card title", async () => {
+        serveBoth(json(200, { items: [] }), inboxBody(), json(200, { items: [approval(1)] }));
+        renderHome(["inbox.read", "agents.run.read"]);
+        await main().findByText("1 item needs your attention.");
+        await userEvent.setup().click(main().getByRole("button", { name: "Data used" }));
+        const feed = screen.getByRole("heading", { name: "Needs your attention", level: 2 }).parentElement?.parentElement;
+        if (!feed) throw new Error("feed card is missing");
+        expect(panelHeadingSteps(feed)).toEqual([1, 1]);
       });
 
       it("does not request approvals without agents.run.read", async () => {

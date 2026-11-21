@@ -236,7 +236,7 @@ func (s *Postgres) postingJournal(ctx context.Context, legalEntityID string, sta
 
 func journalEntry(run Run, ledgerID string, journal []domain.JournalLine) ledgerclient.Entry {
 	e := ledgerclient.Entry{LegalEntityID: run.LegalEntityID, LedgerID: ledgerID, DocumentID: run.ID, PostingDate: run.PayDate, Currency: Currency,
-		IdempotencyKey: sourceType + ":" + run.ID, SourceType: sourceType}
+		IdempotencyKey: ledgerclient.MustPostingKey("payroll", "run", run.ID, "post"), SourceType: sourceType}
 	for _, l := range journal {
 		if !l.Amount.IsZero() {
 			e.Lines = append(e.Lines, ledgerclient.Line{Account: l.Account, Credit: l.Amount.IsNegative(), Amount: l.Amount.Abs()})

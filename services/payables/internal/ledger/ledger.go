@@ -1,7 +1,6 @@
 package ledger
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/shopspring/decimal"
 
-	"github.com/BenjaminSRussell/depot/platform/money"
+	"github.com/BenjaminSRussell/depot/platform/ledgerclient"
 	"github.com/BenjaminSRussell/depot/platform/tenant"
 	"github.com/BenjaminSRussell/depot/services/payables/internal/domain"
 	"github.com/BenjaminSRussell/depot/services/payables/internal/identity"
@@ -42,13 +41,16 @@ type Balance struct {
 const audience = "ledger"
 
 type Client struct {
-	baseURL string
-	http    *http.Client
-	signer  *tenant.ServiceSigner
+	baseURL   string
+	http      *http.Client
+	signer    *tenant.ServiceSigner
+	poster    *ledgerclient.Client
+	posterErr error
 }
 
 func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
 	c.signer = s
+	c.poster, c.posterErr = ledgerclient.New(c.baseURL, sourceSystem, s, c.http)
 	return c
 }
 
@@ -59,7 +61,7 @@ func New(baseURL string, httpClient *http.Client) *Client {
 	noRedirect := *httpClient
 	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	httpClient = &noRedirect
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient, posterErr: ledgerclient.ErrUnsigned}
 }
 
 type balancesBody struct {
@@ -318,127 +320,24 @@ type Entry struct {
 	OptionalDimensions []string
 }
 
-type entryBody struct {
-	LedgerID    string     `json:"ledgerId"`
-	DocumentID  string     `json:"documentId"`
-	PostingDate string     `json:"postingDate"`
-	Source      sourceBody `json:"source"`
-	Lines       []lineBody `json:"lines"`
-	// OptionalDimensions is omitted when empty so entries without one keep their idempotency payload.
-	OptionalDimensions []string `json:"optionalDimensions,omitempty"`
-}
-
-type sourceBody struct {
-	System string `json:"system"`
-	Type   string `json:"type"`
-	ID     string `json:"id"`
-}
-
-type lineBody struct {
-	Account     string            `json:"account"`
-	DebitCredit string            `json:"debitCredit"`
-	Amount      amountBody        `json:"amount"`
-	Text        string            `json:"text,omitempty"`
-	Dimensions  map[string]string `json:"dimensions,omitempty"`
-	// TradingPartnerID names the counterparty legal entity of an intercompany line (#40); omitted for an ordinary line, so entries without one
-	// keep their idempotency payload.
-	TradingPartnerID string `json:"tradingPartnerId,omitempty"`
-}
-
-type amountBody struct {
-	Currency string `json:"currency"`
-	Value    string `json:"value"`
-}
-
-type entryResult struct {
-	Entries []struct {
-		ID string `json:"id"`
-	} `json:"entries"`
-}
-
 func (c *Client) Signed() bool { return c.signer != nil }
 
 func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
-	id, err := c.post(ctx, e)
-	var status *StatusError
-	if errors.As(err, &status) && status.Status == http.StatusBadRequest && status.Code == "COM-0001" && strings.Contains(status.Detail, `unknown field "tradingPartnerId"`) && hasPartner(e) {
-		// A ledger that predates the trading partner (#40) refuses the unknown field. Post without it rather than park the entry; the
-		// consolidation reads such lines as untagged.
-		slog.WarnContext(ctx, "ledger refused tradingPartnerId; posting without it", "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
-		lines := make([]domain.RunJournalLine, len(e.Lines))
-		copy(lines, e.Lines)
-		for i := range lines {
-			lines[i].TradingPartnerID = ""
+	if c.posterErr != nil {
+		return "", c.posterErr
+	}
+	lines := make([]ledgerclient.Line, 0, len(e.Lines))
+	for _, l := range e.Lines {
+		if l.Amount.IsZero() {
+			continue
 		}
-		e.Lines = lines
-		return c.post(ctx, e)
+		lines = append(lines, ledgerclient.Line{Account: l.Account, Credit: l.Credit, Amount: l.Amount, Text: l.Text, Dimensions: l.Dimensions, TradingPartnerID: l.TradingPartnerID})
+	}
+	id, err := c.poster.Post(ctx, ledgerclient.Entry{LegalEntityID: e.LegalEntityID, LedgerID: e.LedgerID, DocumentID: e.DocumentID, PostingDate: e.PostingDate,
+		Currency: e.Currency, IdempotencyKey: e.IdempotencyKey, SourceType: e.SourceType, Lines: lines, OptionalDimensions: e.OptionalDimensions})
+	var failure *ledgerclient.Error
+	if errors.As(err, &failure) {
+		return "", &StatusError{Status: failure.Status, Code: failure.Code, Detail: failure.Detail}
 	}
 	return id, err
-}
-
-func hasPartner(e Entry) bool {
-	for _, l := range e.Lines {
-		if l.TradingPartnerID != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func (c *Client) post(ctx context.Context, e Entry) (string, error) {
-	if c.signer == nil {
-		return "", errors.New("ledger: posting needs a service signing key; the end user's headers are never forwarded for a journal")
-	}
-	principal, ok := tenant.FromContext(ctx)
-	if !ok {
-		return "", errors.New("ledger: no principal in context")
-	}
-	body := entryBody{LedgerID: e.LedgerID, DocumentID: e.DocumentID, PostingDate: e.PostingDate, Source: sourceBody{System: sourceSystem, Type: e.SourceType, ID: e.DocumentID},
-		OptionalDimensions: e.OptionalDimensions}
-	for _, l := range e.Lines {
-		side := "D"
-		if l.Credit {
-			side = "C"
-		}
-		body.Lines = append(body.Lines, lineBody{Account: l.Account, DebitCredit: side, Text: l.Text, Dimensions: l.Dimensions, TradingPartnerID: l.TradingPartnerID, Amount: amountBody{Currency: e.Currency, Value: l.Amount.StringFixed(money.MinorUnits(e.Currency))}})
-	}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return "", fmt.Errorf("ledger: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+entriesPath, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("ledger: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Idempotency-Key", e.IdempotencyKey)
-	if _, err := c.signer.ApplyDuties(req, principal, audience, e.LegalEntityID, []string{dutyEntryPost}); err != nil {
-		return "", fmt.Errorf("ledger: %w", err)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		slog.ErrorContext(ctx, "ledger post failed", "err", err, "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
-		return "", fmt.Errorf("ledger: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-	if err != nil {
-		slog.ErrorContext(ctx, "ledger post read failed", "err", err, "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
-		return "", fmt.Errorf("ledger: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		slog.ErrorContext(ctx, "ledger rejected the entry", "status", resp.StatusCode, "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
-		var problem struct {
-			Code   string `json:"code"`
-			Detail string `json:"detail"`
-		}
-		_ = json.Unmarshal(raw, &problem)
-		return "", &StatusError{Status: resp.StatusCode, Code: problem.Code, Detail: problem.Detail}
-	}
-	var result entryResult
-	if err := json.Unmarshal(raw, &result); err != nil || len(result.Entries) == 0 || result.Entries[0].ID == "" {
-		slog.ErrorContext(ctx, "ledger post response unusable", "err", err, "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
-		return "", errors.New("ledger post: response has no entry id")
-	}
-	return result.Entries[0].ID, nil
 }

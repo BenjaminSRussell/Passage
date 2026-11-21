@@ -324,12 +324,12 @@ func contractAssetAccount(p store.GLProfile) string {
 }
 
 func glEntry(p store.GLProfile, d store.GLDocument, b glBooking) (ledgerclient.Entry, string) {
-	kind, key, source := "invoice", "billing-invoice-", "billing_invoice"
+	kind, documentType, source := "invoice", "invoice", "billing_invoice"
 	if d.CreditNote {
-		kind, key, source = "credit_note", "billing-credit-note-", "billing_credit_note"
+		kind, documentType, source = "credit_note", "creditnote", "billing_credit_note"
 	}
 	e := ledgerclient.Entry{LegalEntityID: p.LegalEntityID, LedgerID: p.LedgerID, DocumentID: d.ID, PostingDate: d.PostingDate, Currency: d.Currency,
-		IdempotencyKey: key + d.ID, SourceType: source}
+		IdempotencyKey: ledgerclient.MustPostingKey("billing", documentType, d.ID, "post"), SourceType: source}
 	text := strings.ReplaceAll(kind, "_", " ") + " " + d.Number
 	// An intercompany invoice names the borrower on the receivable and on the revenue lines (#40); tax and the contract position stay
 	// without a partner.

@@ -56,7 +56,7 @@ type Compensation struct {
 // journal always gets the same key, so the ledger books it once however often it is sent.
 func CompensationKey(planID, entity, documentRef, currency string) string {
 	sum := sha256.Sum256([]byte(planID + "\x1f" + entity + "\x1f" + documentRef + "\x1f" + currency))
-	return "mf-rollback-" + hex.EncodeToString(sum[:16])
+	return ledgerclient.MustPostingKey("migrationfactory", "rollback", hex.EncodeToString(sum[:16]), "post")
 }
 
 // PlanCompensations lists the compensations the journal lines of a rolled-back plan need: one per

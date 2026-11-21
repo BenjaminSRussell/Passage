@@ -32,6 +32,7 @@ export class FakeMcp implements McpConnector {
   readonly connects: Array<{ userId: string; token: string; runId: string | undefined }> = [];
   readonly calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   fail = false;
+  connectDelayMs = 0;
 
   constructor(
     private readonly tools: McpToolInfo[],
@@ -39,6 +40,7 @@ export class FakeMcp implements McpConnector {
   ) {}
 
   async connect(caller: { userId: string }, token: string, runId?: string): Promise<McpSession> {
+    if (this.connectDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.connectDelayMs));
     if (this.fail) throw new Error("gateway down");
     this.connects.push({ userId: caller.userId, token, runId });
     const byName = new Map(this.tools.map((t) => [t.name, t]));

@@ -123,7 +123,7 @@ func TestPostGL_BooksEachApprovedReportOnceAndHandsItToPayablesOnlyThen(t *testi
 		t.Fatalf("ledger entries = %d; want one", len(entries))
 	}
 	e := entries[0]
-	if e.IdempotencyKey != "expense-report-"+good || e.DocumentID != good || e.SourceType != "expense_report" || e.LedgerID != glLedger || e.PostingDate != "2026-03-04" || len(e.Lines) != 3 {
+	if e.IdempotencyKey != "post:expense:report:"+good+":post" || e.DocumentID != good || e.SourceType != "expense_report" || e.LedgerID != glLedger || e.PostingDate != "2026-03-04" || len(e.Lines) != 3 {
 		t.Fatalf("entry = %+v", e.Entry)
 	}
 	got := map[string]string{}

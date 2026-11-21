@@ -114,9 +114,10 @@ func (s *Postgres) unbookedGroups(ctx context.Context, tenantID string, in GLPos
 				return err
 			}
 			r.dr, r.cr = dec(dr), dec(cr)
-			g.key, g.sourceType = "production-journal:"+g.journalID, glJournalSource
 			if g.journalID == "" {
-				g.key, g.sourceType = "production-settlement:"+g.orderID, glSettlementSource
+				g.key, g.sourceType = ledgerclient.MustPostingKey("production", "settlement", g.orderID, "post"), glSettlementSource
+			} else {
+				g.key, g.sourceType = ledgerclient.MustPostingKey("production", "journal", g.journalID, "post"), glJournalSource
 			}
 			existing, ok := byKey[g.key]
 			if !ok {

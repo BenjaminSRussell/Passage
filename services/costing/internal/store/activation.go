@@ -510,7 +510,7 @@ func stageRevaluation(ctx context.Context, tx pgx.Tx, tenantID string, v Costing
 		}
 		key := revaluationKeyPrefix + v.ID + ":" + st.SiteID
 		if err := insertVoucher(ctx, tx, tenantID, voucher{legalEntityID: v.LegalEntityID, sourceKey: key, glLedgerID: profile.GLLedgerID, currency: v.Currency,
-			date: date, key: "costing-" + strings.ReplaceAll(key, ":", "-"), lines: domain.CloseVoucher(profile.accounts(), st.Amount)}); err != nil {
+			date: date, key: voucherKey(key), lines: domain.CloseVoucher(profile.accounts(), st.Amount)}); err != nil {
 			return 0, err
 		}
 		staged++

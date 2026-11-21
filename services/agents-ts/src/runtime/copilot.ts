@@ -25,7 +25,8 @@ import type { AiPlan, AiRouter } from "./aiRouter.js";
 import { EGRESS_GUARD_TOOL, GUARD_POLICY_VERSION, GUARD_REFUSAL_MESSAGE, highestClassOf, type DataClass, type EgressGuard, type GuardContext, type GuardResult, type OutputGuardReason } from "./egressGuard.js";
 import { createChunkReleaser, createOutputGuard, OUTPUT_GUARD_CODE, OUTPUT_GUARD_MESSAGE, OUTPUT_GUARD_TOOL, presentForCaller, stripUnreadableCitations, type OutputGuard } from "./outputGuard.js";
 import { CUI_VIEW_DUTY, type NeedToKnowClient } from "./needToKnow.js";
-import type { McpConnector } from "./mcp.js";
+import type { McpConnector, McpSession } from "./mcp.js";
+import type { LogFn } from "../logging/pseudonymize.js";
 import type { KnowledgeService } from "./knowledge.js";
 
 /** The duty to use the copilot (seeded in policies/authz/data.json). */
@@ -36,6 +37,12 @@ export const TOOL_LIMIT_MESSAGE = "I could not complete the answer within the to
 export const KNOWLEDGE_SEARCH_TOOL = "depot.knowledge.search";
 /** Searching the knowledge index is part of using the copilot: the route is seeded under the same duty (policies/authz/data.json). */
 export const KNOWLEDGE_READ_DUTY = COPILOT_DUTY;
+export const SEARCH_TOOLS_TOOL = "depot.meta.search_tools";
+export const HELP_SEARCH_TOOL = "depot.help.search";
+const TASK_TOOLS: readonly string[] = [SEARCH_TOOLS_TOOL, HELP_SEARCH_TOOL];
+export const TASK_CONNECT_TIMEOUT_MS = 2000;
+export const TASK_MAX_TURNS = 2;
+export const CONNECT_TIMEOUT_CODE = "GATEWAY_CONNECT_TIMEOUT";
 
 /** Request and response of POST /api/v1/copilot/chat; the shape apps/web/src/modules/copilot/api/client.ts validates. */
 export interface ChatRequest {
@@ -91,6 +98,8 @@ export interface CopilotConfig {
   /** Most model turns of one chat (read-tool calls feed further turns). */
   maxTurns: number;
   pseudonymTtlMs: number;
+  /** How long task mode waits for the gateway session before answering without tools; defaults to TASK_CONNECT_TIMEOUT_MS. */
+  taskConnectTimeoutMs?: number;
 }
 
 export interface CopilotDeps {
@@ -108,8 +117,13 @@ export interface CopilotDeps {
   needToKnow?: NeedToKnowClient;
   /** Every tool result is written to the AI data-access audit before the model sees it; a failed write refuses the call. */
   aiAccess: AiAccessAudit;
+  log?: LogFn;
+  /** Task mode answered without a tool: `gateway_unavailable` (the session failed to open) or `no_task_tools` (the caller may call neither). */
+  onTaskFallback?: (reason: TaskFallbackReason) => void;
   now?: () => Date;
 }
+
+export type TaskFallbackReason = "gateway_unavailable" | "no_task_tools";
 
 const MODE_PROMPTS: Record<CopilotMode, string> = {
   ask: "Answer the user's question about their Depot data. Use the read tools to fetch what you need and state only what the tool results show.",
@@ -141,8 +155,9 @@ export function parseChatRequest(raw: unknown): ChatRequest {
   return { mode: mode as CopilotMode, message, ...(recordRef !== undefined ? { recordRef } : {}) };
 }
 
-function systemPrompt(mode: CopilotMode, tools: readonly string[], act?: ChatHooks["act"]): string {
-  if (mode === "route" || mode === "task") return `${MODE_PROMPTS[mode]} ${INJECTION_GUARD}`;
+function systemPrompt(policy: ModePolicy, mode: CopilotMode, tools: readonly string[], act?: ChatHooks["act"]): string {
+  if (policy.toolless || (policy.task && tools.length === 0)) return `${MODE_PROMPTS[mode]} ${INJECTION_GUARD}`;
+  if (policy.task) return `${MODE_PROMPTS[mode]} Tools you may call: ${tools.join(", ")}. To call one, propose it with its arguments; you will receive its result. ${INJECTION_GUARD}`;
   const actTail =
     act === undefined
       ? ""
@@ -153,6 +168,44 @@ function systemPrompt(mode: CopilotMode, tools: readonly string[], act?: ChatHoo
 export const TYPED_REPLACED_NOTICE = "I replaced sensitive numbers in your message with placeholders before sending it to the AI model.";
 
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}...` : s);
+
+const errorClassOf = (err: unknown): string => {
+  if (!(err instanceof Error)) return typeof err;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === "string" ? code.slice(0, 40) : err.name;
+};
+
+async function connectWithin(connect: Promise<McpSession>, ms: number): Promise<McpSession> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error("gateway connect timed out"), { code: CONNECT_TIMEOUT_CODE })), ms);
+  });
+  try {
+    return await Promise.race([connect, timeout]);
+  } finally {
+    clearTimeout(timer);
+    connect.catch(() => undefined);
+  }
+}
+
+type ModePolicy = ReturnType<typeof modePolicy>;
+
+function modePolicy(mode: CopilotMode, hasAct: boolean) {
+  const toolless = mode === "route";
+  const task = mode === "task";
+  return {
+    toolless,
+    task,
+    cacheable: !toolless && !task && !hasAct,
+    knowledgeTool: !toolless && !task,
+    /** Answer-only turns offer the provider no tool at all, so a proposal can never come back. */
+    answerOnly: (allowed: number): boolean => toolless || (task && allowed === 0),
+    maxTurns: (configured: number): number => (task ? Math.min(TASK_MAX_TURNS, configured) : configured),
+    offers: (tool: string): boolean => (task ? TASK_TOOLS.includes(tool) : READ_TOOL.test(tool)),
+    skipsRecords: (tool: string): boolean => tool === KNOWLEDGE_SEARCH_TOOL || (task && TASK_TOOLS.includes(tool)),
+    refusesUnofferedTool: !task,
+  };
+}
 
 /**
  * The copilot chat backend (FR-47.3, BR-47.11). One chat turn: the caller's own tool view (the
@@ -173,19 +226,35 @@ export function createCopilotService(deps: CopilotDeps) {
       const prompt = req.recordRef === undefined ? req.message : `${req.message}\n[record: ${req.recordRef}]`;
       const asker = { tenantId: caller.tenantId, userId: caller.userId, duties: caller.duties };
       const rules = req.mode === "route" ? classifyByRules(req.message) : undefined;
-      const toolless = req.mode === "route" || req.mode === "task";
-      const cacheable = !toolless && hooks.act === undefined;
+      const policy = modePolicy(req.mode, hooks.act !== undefined);
+      const cacheable = policy.cacheable;
       const cached = cacheable ? deps.cache.get(asker, req.mode, prompt) : undefined;
       if (cached !== undefined) return JSON.parse(cached) as ChatResponse;
 
       const runId = randomUUID();
-      const session = toolless ? undefined : await deps.mcp.connect(caller, token, runId);
-      const candidates = session === undefined ? [] : session.tools.filter((t) => t.approvalMode === "none" && READ_TOOL.test(t.name));
-      if (session !== undefined && deps.knowledge !== undefined && !candidates.some((t) => t.name === KNOWLEDGE_SEARCH_TOOL)) {
+      let session: McpSession | undefined;
+      let gatewayError: string | undefined;
+      if (!policy.toolless) {
+        try {
+          const opening = deps.mcp.connect(caller, token, runId);
+          session = policy.task ? await connectWithin(opening, deps.config.taskConnectTimeoutMs ?? TASK_CONNECT_TIMEOUT_MS) : await opening;
+        } catch (err) {
+          if (!policy.task) throw err;
+          gatewayError = errorClassOf(err);
+        }
+      }
+      const candidates = session === undefined ? [] : session.tools.filter((t) => t.approvalMode === "none" && policy.offers(t.name));
+      if (policy.knowledgeTool && session !== undefined && deps.knowledge !== undefined && !candidates.some((t) => t.name === KNOWLEDGE_SEARCH_TOOL)) {
         candidates.push({ name: KNOWLEDGE_SEARCH_TOOL, requiredDuty: KNOWLEDGE_READ_DUTY, approvalMode: "none" } as (typeof candidates)[number]);
       }
       const gate = gateCopilotTools(caller.duties, candidates.map((t) => ({ name: t.name, requiredDuty: t.requiredDuty })));
-      if (session !== undefined && gate.allowed.length === 0) {
+      const answerOnly = policy.answerOnly(gate.allowed.length);
+      if (policy.task && answerOnly) {
+        const reason: TaskFallbackReason = gatewayError !== undefined ? "gateway_unavailable" : "no_task_tools";
+        deps.log?.("warn", "copilot task mode fell back to an answer-only turn", { tenantId: caller.tenantId, runId, reason, ...(gatewayError !== undefined ? { errorClass: gatewayError } : {}) });
+        deps.onTaskFallback?.(reason);
+      }
+      if (session !== undefined && !policy.task && gate.allowed.length === 0) {
         const first = gate.denied[0];
         return refusal(first !== undefined ? "AGT-0203" : "AGT-0212", first?.message ?? "No tool is available to answer this.");
       }
@@ -242,7 +311,7 @@ export function createCopilotService(deps: CopilotDeps) {
       let policyCell: "tenant" | "default" | undefined;
       let policyVersion: number | undefined;
       const withheldKinds = new Set<string>();
-      const system = systemPrompt(req.mode, gate.allowed, hooks.act);
+      const system = systemPrompt(policy, req.mode, gate.allowed, hooks.act);
       const results: string[] = [];
       const pending: Pick<AiAccessRow, "tool" | "entityType" | "recordIds" | "recordClasses">[] = [];
       const sink = hooks.onToken;
@@ -306,7 +375,7 @@ export function createCopilotService(deps: CopilotDeps) {
       };
 
       try {
-        const turns = rules === undefined ? (toolless ? 1 : (hooks.act?.maxTurns ?? deps.config.maxTurns)) : rules.status === "decided" ? 0 : 1;
+        const turns = rules === undefined ? (answerOnly ? 1 : (hooks.act?.maxTurns ?? policy.maxTurns(deps.config.maxTurns))) : rules.status === "decided" ? 0 : 1;
         for (let turn = 0; turn < turns; turn += 1) {
           const verdict = await guard.inspect({ tenantId: caller.tenantId, callId: randomUUID(), routeId, pseudo, system, typed: prompt, results, recordIds, excluded: Object.fromEntries(Object.entries({ [AMOUNT_WITHHELD]: amountsWithheld, NO_APPROVED_ROUTE: withheldCount, NEED_TO_KNOW: needToKnowHidden, TENANT_POLICY: policyDropped }).filter(([, n]) => n > 0)), declared, ...(policyCell !== undefined ? { policyCell } : {}), ...(policyVersion !== undefined ? { policyVersion } : {}) });
           guardRow(verdict.result);
@@ -347,7 +416,8 @@ export function createCopilotService(deps: CopilotDeps) {
           guardContext = verdict.context;
           const context = verdict.user;
           assertNoPii(context);
-          const toolsText = JSON.stringify(proposeTool(gate.allowed, toolless));
+          const noTools = answerOnly || (policy.task && turn === turns - 1);
+          const toolsText = JSON.stringify(proposeTool(gate.allowed, noTools));
           assertPromptWithinCap([system, context, toolsText], deps.config.tokenCap - usage.tokensIn);
           const maxOutputTokens = outputBudgetForCall(
             deps.config.tokenCap,
@@ -356,7 +426,7 @@ export function createCopilotService(deps: CopilotDeps) {
           );
           let response;
           try {
-            const call = { system, user: context, allowedTools: gate.allowed, maxOutputTokens, ...(toolless ? { answerOnly: true } : {}), ...(hooks.signal !== undefined ? { signal: hooks.signal } : {}) };
+            const call = { system, user: context, allowedTools: gate.allowed, maxOutputTokens, ...(noTools ? { answerOnly: true } : {}), ...(hooks.signal !== undefined ? { signal: hooks.signal } : {}) };
             response = releaser !== undefined && provider.stream !== undefined ? await provider.stream(call, (delta) => releaser.push(delta)) : await provider.complete(call);
             await releaser?.end();
           } catch (err) {
@@ -368,7 +438,13 @@ export function createCopilotService(deps: CopilotDeps) {
           usage.tokensOut += used.tokensOut;
           answer = response.text;
           const p = response.proposal;
-          if (outcome.failure !== undefined || p === undefined || session === undefined) break;
+          if (outcome.failure !== undefined || p === undefined || session === undefined || noTools) break;
+          if (!gate.allowed.includes(p.tool) && !policy.refusesUnofferedTool) {
+            toolCalls.push({ tool: p.tool, status: "DENIED", code: "AGT-0203" });
+            row(p.tool, p.args, { error: "AGT-0203" }, "DENIED");
+            answer = "";
+            break;
+          }
           if (!gate.allowed.includes(p.tool)) {
             // BR-47.11: a tool outside the caller's allowed set is refused with AGT-0203, never called.
             const duty = session.describe(p.tool)?.requiredDuty ?? AGENT_INVOKE_DUTY;
@@ -396,7 +472,7 @@ export function createCopilotService(deps: CopilotDeps) {
             continue;
           }
           toolCalls.push({ tool: p.tool, status: "OK" });
-          const found = p.tool === KNOWLEDGE_SEARCH_TOOL ? [] : recordsOf(p.tool, out.output);
+          const found = policy.skipsRecords(p.tool) ? [] : recordsOf(p.tool, out.output);
           const next = found.length === 0 ? undefined : await deps.router.plan({ caller, modelId: deps.modelId, refs: found });
           answer = "";
           const excludedHere = next?.excluded ?? [];
@@ -461,7 +537,7 @@ export function createCopilotService(deps: CopilotDeps) {
             for (const c of g.citations) citations.push({ sourceType: c.sourceType, sourceRef: c.sourceRef, label: c.section });
           }
         }
-        if (answer === "" && refused === null && !toolless) answer = TOOL_LIMIT_MESSAGE;
+        if (answer === "" && refused === null && !answerOnly) answer = TOOL_LIMIT_MESSAGE;
         if (refused === null && outcome.failure === undefined && answer !== "") answer = (await verify(answer, false)) ?? answer;
         if (outcome.failure !== undefined) {
           refused = { code: OUTPUT_GUARD_CODE, message: OUTPUT_GUARD_MESSAGE };
@@ -472,7 +548,7 @@ export function createCopilotService(deps: CopilotDeps) {
             OUTPUT_GUARD_TOOL,
           );
         }
-        const noticed = hooks.act === undefined && req.mode !== "task";
+        const noticed = hooks.act === undefined && !policy.task;
         const notice = noticed && withheldCount > 0 ? `\n\n${exclusionNotice([...withheldKinds], withheldCount)}` : "";
         const replacedNotice = noticed && typedReplaced > 0 ? `\n\n${TYPED_REPLACED_NOTICE}` : "";
         const policyNotice = noticed && policyDropped > 0 ? `\n\n${policyDropped} tool result(s) were left out because your AI data policy does not allow that data.` : "";

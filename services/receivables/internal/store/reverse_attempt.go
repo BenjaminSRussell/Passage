@@ -72,13 +72,12 @@ func newReversalAttempt(pay Payment, app appReversal, u unapplied, generation in
 	positive := func(lines []journalLine) []journalLine {
 		return slices.DeleteFunc(slices.Clone(lines), func(l journalLine) bool { return !l.Amount.IsPositive() })
 	}
-	base := "post:receivables:paymentapplication:" + app.id
 	gen := strconv.Itoa(generation)
 	a := &reversalAttempt{applicationID: app.id, legalEntityID: pay.LegalEntityID, paymentID: pay.ID, postingDate: app.postingDate, state: attemptPending,
 		generation: generation, txid: txid,
-		legs: []*attemptLeg{{name: legMain, key: base + ":reversal:" + gen, currency: pay.Currency, lines: positive(u.main)}}}
+		legs: []*attemptLeg{{name: legMain, key: ledgerclient.MustPostingKey("receivables", "paymentapplication", app.id, "reversal", gen), currency: pay.Currency, lines: positive(u.main)}}}
 	if u.fxLines != nil {
-		a.legs = append(a.legs, &attemptLeg{name: legFX, key: base + ":reversal-fx:" + gen, currency: u.fxCurrency, lines: positive(u.fxLines)})
+		a.legs = append(a.legs, &attemptLeg{name: legFX, key: ledgerclient.MustPostingKey("receivables", "paymentapplication", app.id, "reversal-fx", gen), currency: u.fxCurrency, lines: positive(u.fxLines)})
 	}
 	return a
 }

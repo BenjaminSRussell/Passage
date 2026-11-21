@@ -201,6 +201,8 @@ async function main(): Promise<void> {
     );
   const copilot = createCopilotService({
     aiAccess: createAiAccessAudit({ baseUrl: cfg.auditUrl, signer: serviceSigner, log }),
+    log,
+    onTaskFallback: (reason) => metrics.countTaskFallback(reason),
     guard: createEgressGuard({ log, policy: aiPolicyGuard, observe: (seconds, decision) => metrics.observeGuard(seconds, decision) }),
     outputGuard,
     knowledge,
@@ -222,6 +224,7 @@ async function main(): Promise<void> {
     config: {
       tokenCap: cfg.copilotTokenCap,
       maxTurns: cfg.copilotMaxTurns,
+      taskConnectTimeoutMs: cfg.taskConnectTimeoutMs,
       pseudonymTtlMs: 24 * 3_600_000,
     },
     modelId: cfg.copilotModel,

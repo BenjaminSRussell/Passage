@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { assertNoPii, maskValue, Pseudonymizer, scanPii, SENSITIVE_DUTY } from "../src/domain/redaction.js";
+import { existsSync, readFileSync } from "node:fs";
+import { assertNoPii, maskValue, piiPatternSource, Pseudonymizer, scanPii, SENSITIVE_DUTY, type PiiCategory } from "../src/domain/redaction.js";
 
 const TTL = 24 * 3_600_000;
 
@@ -20,10 +21,19 @@ describe("scanPii", () => {
     expect(performance.now() - started).toBeLessThan(250);
   });
 
-  it("scans 100 KB runs of digits and labelled words in linear time", () => {
-    const started = performance.now();
-    for (const text of ["1".repeat(100 * 1024), "1 ".repeat(50 * 1024), "account ".repeat(12_000), "salary".repeat(16_000)]) expect(scanPii(text)).toEqual([]);
-    expect(performance.now() - started).toBeLessThan(1000);
+  it("scans runs of digits and labelled words in linear time: 1 MB takes under 40 times as long as 100 KB (median of 5 runs)", () => {
+    const timeOf = (kb: number) => {
+      const started = performance.now();
+      for (const text of ["1".repeat(kb * 1024), "1 ".repeat(kb * 512), "account ".repeat(kb * 120), "salary".repeat(kb * 160)]) expect(scanPii(text)).toEqual([]);
+      return performance.now() - started;
+    };
+    const median = (kb: number) => {
+      const runs = Array.from({ length: 5 }, () => timeOf(kb)).sort((a, b) => a - b);
+      return runs[2] ?? 0;
+    };
+    timeOf(100);
+    const large = median(1024);
+    expect(large).toBeLessThan(Math.max(median(100), 1) * 40);
   });
 
   it("finds nothing in ordinary invoice text", () => {
@@ -111,6 +121,15 @@ describe("Pseudonymizer.restoreFor", () => {
   });
 });
 
+describe("SENSITIVE_DUTY", () => {
+  it("names only duties seeded in policies/authz/data.json, so a rename in one place fails here", () => {
+    const file = new URL("../../../policies/authz/data.json", import.meta.url);
+    expect(existsSync(file), "the data.json cross-check requires the monorepo layout (policies/authz/data.json three directories above this test)").toBe(true);
+    const data = JSON.parse(readFileSync(file, "utf8")) as { duties: Record<string, { flag?: boolean }> };
+    for (const duty of Object.values(SENSITIVE_DUTY)) expect(data.duties[duty]?.flag).toBe(true);
+  });
+});
+
 describe("maskValue", () => {
   it("fully masks pay and any amount, whatever the length", () => {
     expect(maskValue("85000", "PAY")).toBe("****");
@@ -129,5 +148,21 @@ describe("maskValue", () => {
     expect(maskValue("4111111111111111", "CARD")).toBe("****1111");
     expect(maskValue("123-45-6789", "SSN")).toBe("****6789");
     expect(maskValue("DE89370400440532013000", "IBAN")).toBe("****3000");
+  });
+});
+
+describe("pattern sources", () => {
+  const previous: Record<PiiCategory, string> = {
+    SSN: String.raw`\b\d{3}-\d{2}-\d{4}\b|(?<=\bssn\w{0,12}["']?\s{0,3}[:=#]?\s{0,3}"?)\d{9}\b`,
+    TAXID: String.raw`(?<=\b(?:(?:EIN|VAT|GSTIN|RFC|TIN)(?:[ _]?(?:id|number|no|num)\.?)?|tax[ _]?(?:id|number|no|num)\.?)["']?\s{0,3}[:=#]?\s{0,3}"?(?:[A-Z]{2} )?)[A-Z0-9&][A-Z0-9&.-]{4,20}[A-Z0-9]`,
+    BANKACCT: String.raw`(?<=(?:account|acct)\w{0,12}(?: (?:number|no|num)\.?)?["']?\s{0,3}[:=#]?\s{0,3}"?)\d(?:[ -]?\d){5,16}\b`,
+    PAY: String.raw`(?<=(?:salary|wage|pay[ _-]?rate|base[ _-]?pay|hourly[ _-]?rate|bonus|compensation)\w{0,12}["']?(?:\s{0,3}[:=]\s{0,3}|\s(?:is|of)\s)(?:\{[^{}]{0,80}?"(?:amount|value|gross|net|base)"\s{0,3}:\s{0,3})?"?(?:[A-Za-z]{3}\s?|[$€£]\s?)?)\d(?:[\d,.]*\d)?`,
+    EMAIL: String.raw`(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`,
+    IBAN: String.raw`\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b`,
+    CARD: String.raw`\b(?:\d{13,19}|\d{4}([ -])\d{4}\1\d{4}\1\d{1,7}|\d{4}([ -])\d{6}\2\d{4,5})\b`,
+  };
+
+  it.each(Object.entries(previous))("keeps the %s pattern source character for character", (category, source) => {
+    expect(piiPatternSource(category as PiiCategory)).toBe(source);
   });
 });

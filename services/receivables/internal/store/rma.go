@@ -473,7 +473,7 @@ func (s *Postgres) ledgerPost(ctx context.Context, row rmaCreditRow, taxLines []
 	}
 	lines = append(lines, ledgerclient.Line{Account: domain.AccountReceivable, Credit: true, Amount: row.net.Add(row.tax)})
 	return s.ledger.Post(ctx, ledgerclient.Entry{LegalEntityID: row.legalEntityID, LedgerID: row.ledgerID, DocumentID: row.doc(),
-		PostingDate: row.postingDate, Currency: row.currency, IdempotencyKey: fmt.Sprintf("rma-credit:%s:%s", row.legalEntityID, row.doc()),
+		PostingDate: row.postingDate, Currency: row.currency, IdempotencyKey: ledgerclient.MustPostingKey("receivables", "rma", row.doc(), "credit"),
 		SourceType: "rma", Lines: lines})
 }
 

@@ -29,6 +29,14 @@ describe("run engine config", () => {
       expect(() => loadConfig({ ...base, AGENTS_OUTPUT_GUARD_TIMEOUT_MS: bad })).toThrow(/AGENTS_OUTPUT_GUARD_TIMEOUT_MS/);
   });
 
+  it("reads the task connect timeout with a 2000 ms default and a 100 to 10000 ms range", () => {
+    expect(loadConfig(base).taskConnectTimeoutMs).toBe(2000);
+    expect(loadConfig({ ...base, AGENTS_TASK_CONNECT_TIMEOUT_MS: "100" }).taskConnectTimeoutMs).toBe(100);
+    expect(loadConfig({ ...base, AGENTS_TASK_CONNECT_TIMEOUT_MS: "10000" }).taskConnectTimeoutMs).toBe(10_000);
+    for (const bad of ["99", "10001", "abc", "0", "1.5"])
+      expect(() => loadConfig({ ...base, AGENTS_TASK_CONNECT_TIMEOUT_MS: bad })).toThrow(/AGENTS_TASK_CONNECT_TIMEOUT_MS/);
+  });
+
   it("reads the need-to-know cache time with a 10000 ms default and a 60000 ms ceiling", () => {
     expect(loadConfig(base).needToKnowCacheMs).toBe(10_000);
     expect(loadConfig({ ...base, AGENTS_NEED_TO_KNOW_CACHE_MS: "60000" }).needToKnowCacheMs).toBe(60_000);

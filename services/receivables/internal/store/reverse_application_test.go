@@ -583,7 +583,7 @@ func (f crossCurrencyFixture) reversalEntries() []ledgerclient.Stored {
 }
 
 func (f crossCurrencyFixture) compensationEntries() []ledgerclient.Stored {
-	return f.entriesOf("receivables-"+JournalReversalCompensation, "gl-journal:")
+	return f.entriesOf("receivables-"+JournalReversalCompensation, "post:receivables:journal:")
 }
 
 func compensationsIn(fake *ledgerclient.Fake) []ledgerclient.Stored {
