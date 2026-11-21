@@ -31,6 +31,10 @@ on:
         type: boolean
         required: false
         default: false
+      guardrails:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -247,6 +251,45 @@ jobs:
           done
       # The demo-flows project has its own job below, so a failure there names the demo flows.
       - run: npx playwright test --project=chromium --project=warehouse-mobile
+
+  web-guardrails:
+    name: web guardrails
+    if: inputs.guardrails
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: |
+          for attempt in 1 2 3; do
+            "$GITHUB_WORKSPACE/.github/scripts/apt-direct-mirror.sh"
+            npx playwright install --with-deps chromium && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "::warning::Chromium's system packages could not be installed; installing the browser alone"
+              npx playwright install chromium
+              break
+            fi
+            sleep $((attempt * 20))
+          done
+      - run: npx playwright test --project=guardrails --project=guardrails-ap-clerk --project=guardrails-planner --project=guardrails-read-only
+      - name: Traceability report
+        if: always()
+        run: node scripts/guardrail-report.mjs
+      - name: Upload traceability report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: guardrail-traceability
+          path: apps/web/test-results/guardrails/traceability.*
+          if-no-files-found: warn
 
   # The procure-to-pay and order-to-cash flows, the keyboard-only requisition run, the reflow check at 390 and 320 px and
   # the axe scan of every workspace route (WCAG 2.2 AA, desktop and 390 px) run against the demo build: the real UI over

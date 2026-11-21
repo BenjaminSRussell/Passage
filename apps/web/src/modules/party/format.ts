@@ -1,6 +1,7 @@
 export const dash = "—";
 
-export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const COUNTRY = /^[A-Za-z]{2}$/;
 
@@ -29,13 +30,16 @@ export const taxTypeLabel: Record<string, string> = {
 
 export const pendingFieldLabel: Record<string, string> = {
   credit_limit: "Credit limit",
+  vendor_bank_account: "Vendor bank account",
 };
 
 /** "2026-10-26 08:00 UTC". */
 export function formatDateTime(iso?: string | null): string {
   if (!iso) return dash;
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  return Number.isNaN(date.getTime())
+    ? iso
+    : `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 export function displayOrDash(value?: string | null): string {

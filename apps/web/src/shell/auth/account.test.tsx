@@ -27,6 +27,26 @@ describe("account basics", () => {
     expect(auth.logout).toHaveBeenCalledOnce();
   });
 
+  it("closes on Escape without letting a surrounding dialog see the key, and keeps focus on its button", async () => {
+    const outer = vi.fn();
+    const auth: Auth = { ensureSession: vi.fn(), accessToken: vi.fn(), login: vi.fn(), logout: vi.fn(), reauthenticate: vi.fn() };
+    render(
+      <AccountProvider auth={auth} session={session}>
+        <div onKeyDown={outer}>
+          <UserMenu />
+        </div>
+      </AccountProvider>,
+    );
+    const trigger = screen.getByRole("button", { name: /Account: Ada Lovelace/ });
+    await userEvent.click(trigger);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+    expect(outer).not.toHaveBeenCalled();
+    expect(trigger).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(outer).toHaveBeenCalledOnce();
+  });
+
   it("asks the user to sign in again when the API says the session ended", async () => {
     const auth = setup();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

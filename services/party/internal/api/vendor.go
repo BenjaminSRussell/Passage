@@ -124,7 +124,7 @@ func (a *API) addBankAccount(w http.ResponseWriter, r *http.Request) {
 		failParty(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusCreated, account)
+	httpx.JSON(w, http.StatusAccepted, account)
 }
 
 func (a *API) listBankAccounts(reveal bool) http.HandlerFunc {

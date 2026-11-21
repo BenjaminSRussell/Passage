@@ -48,22 +48,30 @@ export function UserMenu() {
   const account = useAccount();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!open) return;
     const close = (event: Event) => {
-      if (event instanceof KeyboardEvent ? event.key === "Escape" : !root.current?.contains(event.target as Node)) setOpen(false);
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
-    document.addEventListener("keydown", close);
     document.addEventListener("mousedown", close);
-    return () => {
-      document.removeEventListener("keydown", close);
-      document.removeEventListener("mousedown", close);
-    };
+    return () => document.removeEventListener("mousedown", close);
   }, [open]);
   if (account === null) return null;
   return (
-    <div ref={root} className={styles.menu}>
-      <Button variant="ghost" size="sm" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((v) => !v)}>
+    <div
+      ref={root}
+      className={styles.menu}
+      onKeyDown={(event) => {
+        // Escape closes the menu first; stop it here so a surrounding dialog (the context sheet) stays open.
+        if (open && event.key === "Escape") {
+          event.stopPropagation();
+          setOpen(false);
+          trigger.current?.focus();
+        }
+      }}
+    >
+      <Button ref={trigger} variant="ghost" size="sm" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((v) => !v)}>
         {copy.account.menuLabel}: {account.name}
       </Button>
       {open ? (

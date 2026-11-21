@@ -32,7 +32,7 @@ const (
 	FieldBankAccountNo  = "vendor_bank_account.account_number"
 	FieldBankRoutingNo  = "vendor_bank_account.routing_number"
 	vendorColumns       = `id::text, party_id::text, legal_entity_id::text, account_number, vendor_group_id::text, coalesce((select g.code from vendor_group g where g.tenant_id = vendor_role.tenant_id and g.id = vendor_role.vendor_group_id), ''), payment_term_id::text, currency_code, blocked, version`
-	bankColumns         = `id::text, vendor_id::text, account_holder, bank_country, currency_code, account_last4`
+	bankColumns         = `id::text, vendor_id::text, account_holder, bank_country, currency_code, account_last4, status`
 	foreignKeyViolation = "23503"
 	vendorKeyPrefix     = "vendor-role:"
 )
@@ -231,16 +231,77 @@ func (s *Postgres) AddBankAccount(ctx context.Context, vendorID string, in domai
 	// vendor_bank_account is audited through CDC (B-07): the depot.ctx message names the verified actor, the reason
 	// and the trace id of this change for the audit trail.
 	err = auditctx.WithAuditedTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `insert into vendor_bank_account (tenant_id, id, vendor_id, legal_entity_id, account_holder, bank_country, currency_code, account_last4, account_number_sealed, routing_number_sealed, created_by)
-			select tenant_id, $3, id, legal_entity_id, $4, $5, $6, $7, $8, $9, $10 from vendor_role where tenant_id = $1 and id = $2
+		err := tx.QueryRow(ctx, `insert into vendor_bank_account (tenant_id, id, vendor_id, legal_entity_id, account_holder, bank_country, currency_code, account_last4, account_number_sealed, routing_number_sealed, created_by, status)
+			select tenant_id, $3, id, legal_entity_id, $4, $5, $6, $7, $8, $9, $10, 'pending' from vendor_role where tenant_id = $1 and id = $2
 			returning `+bankColumns, caller.TenantID, id, ids.New(), in.AccountHolder, in.BankCountry, in.CurrencyCode, in.Last4(), account, routing, caller.UserID).
-			Scan(&b.ID, &b.VendorID, &b.AccountHolder, &b.BankCountry, &b.CurrencyCode, &b.AccountLast4)
+			Scan(&b.ID, &b.VendorID, &b.AccountHolder, &b.BankCountry, &b.CurrencyCode, &b.AccountLast4, &b.Status)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return vendorNotFound()
 		}
+		if err != nil {
+			return err
+		}
+		change, err := scanChange(tx.QueryRow(ctx, `insert into pending_change (tenant_id, id, legal_entity_id, vendor_id, bank_account_id, field, requested_by)
+			select tenant_id, $3, legal_entity_id, vendor_id, id, $4, $5 from vendor_bank_account where tenant_id = $1 and id = $2
+			returning `+changeColumns, caller.TenantID, b.ID, ids.New(), domain.FieldVendorBank, caller.UserID))
+		b.PendingChangeID = change.ID
 		return err
 	})
 	return b, err
+}
+
+func bankStatus(approve bool) string {
+	if approve {
+		return "active"
+	}
+	return "rejected"
+}
+
+func setBankAccountStatus(ctx context.Context, tx pgx.Tx, tenantID, accountID, status string) error {
+	tag, err := tx.Exec(ctx, `update vendor_bank_account set status = $3 where tenant_id = $1 and id = $2 and status = 'pending'`, tenantID, accountID, status)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return httpx.NewProblem(http.StatusConflict, CodeChangeStale, "the bank account is no longer pending; reject this change")
+	}
+	return nil
+}
+
+func enqueueVendorBankChange(ctx context.Context, tx pgx.Tx, tenantID string, c domain.PendingChange, approve bool) error {
+	if !approve {
+		return nil
+	}
+	data := partyevents.VendorBankChangedData{
+		VendorID: c.VendorID, LegalEntityID: c.LegalEntityID, BankAccountID: c.BankAccountID, ChangeID: c.ID,
+		RequestedBy: c.RequestedBy, ApprovedBy: *c.DecidedBy, ReplacedLast4: []string{}, NoticeRequired: true,
+	}
+	rows, err := tx.Query(ctx, `select id::text = $3, account_last4 from vendor_bank_account where tenant_id = $1 and vendor_id = $2 and status = 'active' order by created_at, id`, tenantID, c.VendorID, c.BankAccountID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var isNew bool
+		var last4 string
+		if err := rows.Scan(&isNew, &last4); err != nil {
+			return err
+		}
+		if isNew {
+			data.NewLast4 = last4
+		} else {
+			data.ReplacedLast4 = append(data.ReplacedLast4, last4)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	evt, err := events.New(partyevents.VendorBankChanged, domain.EventSource, c.VendorID, tenantID, data)
+	if err != nil {
+		return err
+	}
+	return outbox.Enqueue(ctx, tx, domain.AggregateVendor, c.VendorID, evt)
 }
 
 func (s *Postgres) ListBankAccounts(ctx context.Context, vendorID string, reveal bool) ([]domain.BankAccount, error) {
@@ -261,7 +322,7 @@ func (s *Postgres) ListBankAccounts(ctx context.Context, vendorID string, reveal
 			}
 			return err
 		}
-		rows, err := tx.Query(ctx, `select `+bankColumns+`, account_number_sealed, routing_number_sealed from vendor_bank_account where tenant_id = $1 and vendor_id = $2 order by created_at, id`, caller.TenantID, id)
+		rows, err := tx.Query(ctx, `select `+bankColumns+`, account_number_sealed, routing_number_sealed from vendor_bank_account where tenant_id = $1 and vendor_id = $2 and (status = 'active' or (not $3 and status = 'pending')) order by created_at, id`, caller.TenantID, id, reveal)
 		if err != nil {
 			return err
 		}
@@ -269,7 +330,7 @@ func (s *Postgres) ListBankAccounts(ctx context.Context, vendorID string, reveal
 		for rows.Next() {
 			var b domain.BankAccount
 			var account, routing []byte
-			if err := rows.Scan(&b.ID, &b.VendorID, &b.AccountHolder, &b.BankCountry, &b.CurrencyCode, &b.AccountLast4, &account, &routing); err != nil {
+			if err := rows.Scan(&b.ID, &b.VendorID, &b.AccountHolder, &b.BankCountry, &b.CurrencyCode, &b.AccountLast4, &b.Status, &account, &routing); err != nil {
 				return err
 			}
 			if reveal {

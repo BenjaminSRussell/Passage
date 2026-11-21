@@ -89,6 +89,12 @@
   gap: var(--space-2);
 }
 
+.suggestions > button {
+  max-inline-size: 100%;
+  white-space: normal;
+  text-align: start;
+}
+
 .suggestionsTitle {
   color: var(--color-text-muted);
   font-size: var(--text-sm-size);

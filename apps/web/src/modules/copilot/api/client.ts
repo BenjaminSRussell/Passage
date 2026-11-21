@@ -1,17 +1,29 @@
 import { z } from "zod";
 import type { CopilotMode } from "../domain";
 import { apiFetch } from "../../../shell/api/http";
-import { AI_REQUEST_TIMEOUT_MS, withDeadline } from "../../../shell/assistant/availability";
+import { AI_REQUEST_TIMEOUT_MS, BUDGET_REFUSAL_CODE, withDeadline } from "../../../shell/assistant/availability";
 
 export const COPILOT_TIMEOUT_MESSAGE = "Copilot did not answer in time.";
 
 export class CopilotError extends Error {
   readonly code: string | undefined;
-  constructor(message: string, code?: string) {
+  readonly status: number | undefined;
+  constructor(message: string, code?: string, status?: number) {
     super(message);
     this.name = "CopilotError";
     this.code = code;
+    this.status = status;
   }
+}
+
+const AI_UNAVAILABLE_STATUS = 503;
+const AI_UNAVAILABLE_CODES: readonly string[] = ["AGT-0201", BUDGET_REFUSAL_CODE];
+
+export function isAiUnavailable(failure: unknown): boolean {
+  if (failure instanceof CopilotError) {
+    return failure.message === COPILOT_TIMEOUT_MESSAGE || failure.status === AI_UNAVAILABLE_STATUS || (failure.code !== undefined && AI_UNAVAILABLE_CODES.includes(failure.code));
+  }
+  return failure instanceof TypeError;
 }
 
 const problemSchema = z.object({ code: z.string() });
@@ -23,7 +35,7 @@ export async function failedCopilotCall(res: Response): Promise<CopilotError> {
   } catch {
     code = undefined;
   }
-  return new CopilotError(`Copilot is unavailable (HTTP ${res.status}).`, code);
+  return new CopilotError(`Copilot is unavailable (HTTP ${res.status}).`, code, res.status);
 }
 
 /** Response of POST /api/v1/copilot/chat. Validated before any field is rendered. */

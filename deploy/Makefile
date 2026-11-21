@@ -100,7 +100,7 @@ test-argocd:
 
 # Live check of D34 on the dev cluster (#213): produces one event to a topic of each consumer group dev turns on, as a
 # temporary KafkaUser, and waits for the group's committed offset to move past it. Needs kubectl with a context on the dev
-# cluster (CONTEXT, default the current one). Not run in CI; `scripts/smoke_consumers.py --dry-run` prints the plan.
+# cluster (CONTEXT is required; the script refuses to guess the current one). Not run in CI; `scripts/smoke_consumers.py --dry-run` prints the plan.
 CONTEXT ?=
 smoke-consumers:
 	$(PYTHON) scripts/smoke_consumers.py $(if $(CONTEXT),--context $(CONTEXT))

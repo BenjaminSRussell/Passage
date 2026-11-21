@@ -8,12 +8,44 @@ import { formatDateTime, isUuid } from "./format";
 import { useLoad } from "./useLoad";
 
 const columns: ListColumn<PendingChange>[] = [
-  { key: "customerId", header: "Customer", render: (c) => <EntityName entity="customer" id={c.customerId} />, sortValue: () => "" },
-  { key: "legalEntityId", header: "Legal entity", render: (c) => <EntityName entity="legalEntity" id={c.legalEntityId} />, sortValue: () => "", defaultHidden: true },
-  { key: "currentValue", header: "Current limit", align: "end", render: (c) => c.currentValue ?? "None", csv: (c) => c.currentValue ?? "" },
-  { key: "requestedValue", header: "Requested limit", align: "end" },
-  { key: "requestedBy", header: "Requested by", render: (c) => <UserName id={c.requestedBy} />, sortValue: () => "" },
-  { key: "requestedAt", header: "Requested", render: (c) => formatDateTime(c.requestedAt), csv: (c) => c.requestedAt },
+  {
+    key: "customerId",
+    header: "Customer or vendor",
+    render: (c) =>
+      c.customerId ? (
+        <EntityName entity="customer" id={c.customerId} />
+      ) : (
+        <EntityName entity="vendor" id={c.vendorId ?? ""} />
+      ),
+    sortValue: () => "",
+  },
+  {
+    key: "legalEntityId",
+    header: "Legal entity",
+    render: (c) => <EntityName entity="legalEntity" id={c.legalEntityId} />,
+    sortValue: () => "",
+    defaultHidden: true,
+  },
+  {
+    key: "currentValue",
+    header: "Current value",
+    align: "end",
+    render: (c) => c.currentValue ?? "None",
+    csv: (c) => c.currentValue ?? "",
+  },
+  { key: "requestedValue", header: "Requested value", align: "end" },
+  {
+    key: "requestedBy",
+    header: "Requested by",
+    render: (c) => <UserName id={c.requestedBy} />,
+    sortValue: () => "",
+  },
+  {
+    key: "requestedAt",
+    header: "Requested",
+    render: (c) => formatDateTime(c.requestedAt),
+    csv: (c) => c.requestedAt,
+  },
 ];
 
 interface MorePages {
@@ -32,7 +64,8 @@ function usePendingRows(): ListData<PendingChange> {
       if (!signal.aborted) setForbidden(false);
       return page;
     } catch (error) {
-      if (!signal.aborted) setForbidden((error as { status?: number }).status === 403);
+      if (!signal.aborted)
+        setForbidden((error as { status?: number }).status === 403);
       throw error;
     }
   }, "pending-changes");
@@ -42,13 +75,19 @@ function usePendingRows(): ListData<PendingChange> {
     setMore({ rows: more?.rows ?? [], cursor, loading: true });
     try {
       const page = await listPendingChanges(cursor);
-      setMore({ rows: [...(more?.rows ?? []), ...page.items], cursor: page.nextCursor, loading: false });
+      setMore({
+        rows: [...(more?.rows ?? []), ...page.items],
+        cursor: page.nextCursor,
+        loading: false,
+      });
     } catch {
       setMore({ rows: more?.rows ?? [], cursor, loading: false });
     }
   }
   return {
-    rows: state.error ? [] : [...(state.data?.items ?? []), ...(more?.rows ?? [])],
+    rows: state.error
+      ? []
+      : [...(state.data?.items ?? []), ...(more?.rows ?? [])],
     loading: state.loading,
     loadingMore: Boolean(more?.loading),
     error: state.error ?? undefined,
@@ -68,7 +107,8 @@ export function PendingChangesPage() {
   const [params] = useSearchParams();
   const linked = params.get("id") ?? "";
   useEffect(() => {
-    if (isUuid(linked)) navigate(`/party/pending-changes/${linked}`, { replace: true });
+    if (isUuid(linked))
+      navigate(`/party/pending-changes/${linked}`, { replace: true });
   }, [linked, navigate]);
   return (
     <ListPage
@@ -81,8 +121,14 @@ export function PendingChangesPage() {
       useRows={usePendingRows}
       search={(c) => ({ number: c.requestedValue, name: c.requestedBy })}
       getRowKey={(c) => c.id}
-      onRowOpen={(c) => navigate(`/party/pending-changes/${encodeURIComponent(c.id)}`)}
-      empty={{ title: "No credit limit changes waiting", description: "A credit-limit increase above the approval threshold waits here until someone approves or rejects it." }}
+      onRowOpen={(c) =>
+        navigate(`/party/pending-changes/${encodeURIComponent(c.id)}`)
+      }
+      empty={{
+        title: "No credit limit changes waiting",
+        description:
+          "A credit-limit increase above the approval threshold waits here until someone approves or rejects it.",
+      }}
     />
   );
 }

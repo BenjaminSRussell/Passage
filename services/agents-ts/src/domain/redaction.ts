@@ -70,7 +70,8 @@ export const PSEUDONYM_RE = /\[(?:EMAIL|IBAN|CARD|SSN|TAXID|BANKACCT|PAY|AMOUNT)
 
 export const P3_CATEGORIES: readonly PiiCategory[] = ["IBAN", "CARD", "SSN", "TAXID", "BANKACCT", "PAY"];
 
-export const SENSITIVE_DUTY = { payroll: "ViewSensitivePayroll", worker: "ViewSensitiveWorker" } as const;
+// payroll is PRD ViewSensitivePayroll, worker is PRD ViewSensitiveWorker
+export const SENSITIVE_DUTY = { payroll: "agents.sensitive-payroll.view", worker: "agents.sensitive-worker.view" } as const;
 
 const P3_DOMAIN: Partial<Record<PiiCategory, keyof typeof SENSITIVE_DUTY>> = { PAY: "payroll", SSN: "worker", TAXID: "worker" };
 

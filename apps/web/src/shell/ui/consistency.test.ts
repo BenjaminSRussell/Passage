@@ -16,10 +16,15 @@
  * 3. Create forms on the form standard (docs/forms.md). A procure-to-pay or order-to-cash page exported as `New…Page` or
  *    `…CreatePage` renders `FormErrorSummary` and guards unsaved changes with `useUnsavedChanges`.
  *
+ * 4. Hand-rolled selection. A module that keeps its own `Set<string>` selection with a checkbox in a table is listed in
+ *    `handRolledSelection.json` until it moves to `ListPage` `bulk`; the audit fails when an unlisted file has the shape and
+ *    when a listed file no longer does (remove it from the list).
+ *
  * Run `npx vitest run src/shell/ui/consistency.test.ts` to see the report; the failure message lists what to change.
  */
 import { describe, expect, it } from "vitest";
 import backlog from "./listPageBacklog.json";
+import handRolled from "./handRolledSelection.json";
 import allowlist from "./rawControlsAllowlist.json";
 
 const sources = import.meta.glob<string>(["../../modules/**/*.tsx", "!../../modules/**/*.test.tsx"], { query: "?raw", import: "default", eager: true });
@@ -61,6 +66,11 @@ export function isUnconvertedList(source: string): boolean {
  */
 export function isRecordPage(file: string): boolean {
   return /\/(?:[A-Za-z]+Detail|New[A-Za-z]+)Page\.tsx$/.test(file);
+}
+
+/** A module file with its own Set<string> selection and a checkbox beside a table. */
+export function isHandRolledSelection(source: string): boolean {
+  return source.includes("Set<string>") && source.includes('type="checkbox"') && /<(?:table|DataTable)[\s>]/.test(source);
 }
 
 const moduleOf = (path: string) => path.replace("../../modules/", "").split("/")[0];
@@ -105,7 +115,20 @@ describe("UI consistency audit", () => {
     expect(missing, "create forms follow docs/forms.md").toEqual([]);
   });
 
+  it("lists every module file that keeps its own row selection", () => {
+    const listed = new Set<string>(handRolled.files);
+    const now = Object.entries(sources)
+      .filter(([, source]) => isHandRolledSelection(source))
+      .map(([path]) => fileOf(path))
+      .sort();
+    expect(now.filter((f) => !listed.has(f)), "select rows with ListPage bulk (UXS-04)").toEqual([]);
+    expect([...listed].filter((f) => !now.includes(f)), "these no longer keep their own selection: remove them from handRolledSelection.json").toEqual([]);
+  });
+
   it("recognises the shapes it looks for", () => {
+    expect(isHandRolledSelection('const [picked, setPicked] = useState<Set<string>>(new Set()); <table><input type="checkbox" /></table>')).toBe(true);
+    expect(isHandRolledSelection('<DataTable /><input type="checkbox" />')).toBe(false);
+    expect(isHandRolledSelection('useState<Set<string>>(); <input type="checkbox" />')).toBe(false);
     expect(rawControls('<table className="x"><button type="button">Go</button><input type="checkbox" /><input /><input type="number"/>')).toEqual({ table: 1, button: 1, input: 2 });
     expect(rawControls("<Table><Button><DataTable /><PageHeader /></Button></Table>")).toEqual({});
     expect(isUnconvertedList("<PageHeader /><DataTable onRowOpen={open} />")).toBe(true);

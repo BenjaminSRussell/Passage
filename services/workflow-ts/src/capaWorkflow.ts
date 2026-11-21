@@ -1,4 +1,4 @@
-import { ActivityFailure, condition, defineQuery, defineSignal, metricMeter, proxyActivities, setHandler, sleep } from "@temporalio/workflow";
+import { ActivityFailure, ApplicationFailure, condition, defineQuery, defineSignal, metricMeter, proxyActivities, setHandler, sleep } from "@temporalio/workflow";
 import type { CapaActivities } from "./capaActivities.js";
 
 export type EffectivenessResult = "EFFECTIVE" | "NOT_EFFECTIVE";
@@ -12,6 +12,8 @@ export interface CapaInput {
   stepTimeoutMs: number;
   effectivenessTimeoutMs: number;
   maxReopens: number;
+  awaitApproval?: boolean;
+  approvalGiveUpMs?: number;
 }
 
 export interface CapaRef {
@@ -39,12 +41,13 @@ export interface CapaState {
   ncrId: string;
   tenantId: string;
   legalEntityId: string;
-  status: "in_correction" | "effectiveness_pending" | "awaiting_effectiveness" | "closed" | "stalled" | "escalated";
+  status: "awaiting_approval" | "not_started" | "in_correction" | "effectiveness_pending" | "awaiting_effectiveness" | "closed" | "stalled" | "escalated";
   currentStep: number;
   reopened: number;
   implementer?: string;
   refusedChecks: number;
   stalledAt?: "step" | "effectiveness";
+  outcome?: string;
 }
 
 interface StepDone {
@@ -66,6 +69,9 @@ export const capaEffectivenessSignal = defineSignal<[checked: EffectivenessCheck
 export const capaStateQuery = defineQuery<CapaState>("capa-state");
 
 const LAST_STEP = 7;
+const APPROVAL_POLL_START_MS = 60_000;
+const APPROVAL_POLL_CAP_MS = 60 * 60_000;
+const APPROVAL_GIVE_UP_MS = 30 * 24 * 60 * 60_000;
 
 const activities = proxyActivities<CapaActivities>({
   startToCloseTimeout: "1 minute",
@@ -107,6 +113,36 @@ export async function capaWorkflow(input: CapaInput): Promise<CapaState> {
     state.reopened = ncr.correction?.reopened ?? state.reopened;
     state.implementer = ncr.correction?.steps.find((s) => s.step === LAST_STEP)?.completedBy;
   };
+
+  const notStarted = (outcome: string): CapaState => {
+    metricMeter.createCounter("depot_capa_not_started", "1", "CAPAs that never started because the nonconformance was not approved").add(1, { ncr_id: input.ncrId });
+    return Object.assign(state, { status: "not_started" as const, outcome });
+  };
+
+  if (input.awaitApproval) {
+    state.status = "awaiting_approval";
+    const giveUpAt = Date.now() + (input.approvalGiveUpMs ?? APPROVAL_GIVE_UP_MS);
+    let delay = APPROVAL_POLL_START_MS;
+    for (;;) {
+      let current: CapaNcr | undefined;
+      try {
+        current = await activities.readNonconformance(as(input.startedBy, [input.legalEntityId]));
+      } catch (error) {
+        if (!(error instanceof ActivityFailure)) throw error;
+        if (error.cause instanceof ApplicationFailure && error.cause.type === "ServiceCallRejected") {
+          return notStarted("The nonconformance could not be read, so no correction was started.");
+        }
+      }
+      if (current) {
+        if (current.status === "APPROVED" || current.correction) break;
+        if (current.status !== "NEW") return notStarted(`The nonconformance is ${current.status}, so no correction was started.`);
+      }
+      if (Date.now() >= giveUpAt) return notStarted("The nonconformance was not approved within the waiting period, so no correction was started.");
+      await sleep(Math.min(delay, giveUpAt - Date.now()));
+      delay = Math.min(delay * 2, APPROVAL_POLL_CAP_MS);
+    }
+    state.status = "in_correction";
+  }
 
   let ncr = await activities.startCorrection({ ...as(input.startedBy, [input.legalEntityId]), effectivenessCheckDays: input.effectivenessCheckDays });
   follow(ncr);

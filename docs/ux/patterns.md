@@ -273,6 +273,13 @@ Until all seven rows pass their contract test (Enforcement), milestone M2 in `ro
 - New source scan in `consistency.test.ts`: a module file that keeps its own selection state (`Set<string>` state plus a checkbox inside a `DataTable` column) is listed in `shell/ui/handRolledSelection.json` (the twelve known files) and must leave it when converted.
 - Extend `e2e/payables.demo.spec.ts` with AP4 (pay two chosen invoices in one payment).
 
+**As built in `ListPage` (selection, bulk, paste, undo)**
+- `bulk: BulkAction[]` adds a checkbox column (`DataTable` `selection`) and the bulk bar. An action is `{ id, label, run(rows), confirm?, undo?(done) }`; `run` gets only the selected rows that are still shown and resolves `{ done: string[], failed: { key, reason }[] }`. The page never calls an endpoint.
+- Select all selects the rows shown (after search and filter). Failed keys stay selected so a retry targets only them; a rejected `run` shows the problem and keeps the selection.
+- `paste: { fields, onCommit, undo? }` adds "Paste rows". The dialog parses tab-separated text (a header row is skipped, 500 rows at most), previews every row with its problem, and applies nothing while a row is invalid.
+- `undo` is offered once after a run that changed rows and cleared when the selection changes. `rowLabel(row)` names each checkbox and failure line; it defaults to the row key.
+- Server `PreferenceStorage`, shared and role-default views, and the module bulk actions are later slices of B-28.
+
 **Resolves:** UX-015, UX-016, UX-017, UX-026, UX-031 (web half), UX-032 (paste of item numbers, with UXS-02).
 
 ---

@@ -30,7 +30,8 @@ jobs:
       connect: ${{ steps.filter.outputs.connect }}
       portals: ${{ steps.filter.outputs.portals }}
       workflow: ${{ steps.filter.outputs.workflow }}
-      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.py == 'true' || steps.filter.outputs.warehouse == 'true' || steps.filter.outputs.charts == 'true' || steps.filter.outputs.agents == 'true' || steps.filter.outputs.connect == 'true' || steps.filter.outputs.portals == 'true' || steps.filter.outputs.workflow == 'true' || steps.filter.outputs.architecture == 'true' }}
+      guardrails: ${{ steps.filter.outputs.guardrails }}
+      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.py == 'true' || steps.filter.outputs.warehouse == 'true' || steps.filter.outputs.charts == 'true' || steps.filter.outputs.agents == 'true' || steps.filter.outputs.connect == 'true' || steps.filter.outputs.portals == 'true' || steps.filter.outputs.workflow == 'true' || steps.filter.outputs.guardrails == 'true' || steps.filter.outputs.architecture == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - id: filter
@@ -45,6 +46,15 @@ jobs:
               - '.github/workflows/**'
             web:
               - 'apps/web/**'
+              - '.github/workflows/**'
+            guardrails:
+              - 'apps/web/src/shell/home/**'
+              - 'apps/web/src/modules/copilot/**'
+              - 'apps/web/src/shell/CommandPalette*'
+              - 'apps/web/src/shell/search/**'
+              - 'apps/web/e2e/**'
+              - 'apps/web/playwright.config.ts'
+              - 'apps/web/scripts/guardrail-report*'
               - '.github/workflows/**'
             warehouse:
               - 'apps/warehouse-mobile/**'
@@ -61,6 +71,7 @@ jobs:
               - 'services/agents-ts/**'
               - 'services/mcp-ts/**'
               - 'evals/**'
+              - 'policies/authz/data.json'
               - '.github/workflows/**'
             charts:
               - 'services/**/charts/**'
@@ -105,6 +116,7 @@ jobs:
       connect: ${{ needs.changes.outputs.connect == 'true' }}
       portals: ${{ needs.changes.outputs.portals == 'true' }}
       workflow: ${{ needs.changes.outputs.workflow == 'true' }}
+      guardrails: ${{ needs.changes.outputs.guardrails == 'true' }}
     permissions:
       contents: read
       packages: write

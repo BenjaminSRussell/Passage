@@ -1,6 +1,7 @@
 package party
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -118,6 +119,10 @@ func (c *Client) VendorExists(ctx context.Context, legalEntityID, vendorID strin
 }
 
 func (c *Client) fetch(ctx context.Context, legalEntityID, vendorID, path, duty string) ([]byte, error) {
+	return c.call(ctx, legalEntityID, http.MethodGet, fmt.Sprintf(path, url.PathEscape(vendorID)), nil, duty, ErrVendorNotFound)
+}
+
+func (c *Client) call(ctx context.Context, legalEntityID, method, target string, body []byte, duty string, notFound error) ([]byte, error) {
 	if c.signer == nil {
 		return nil, ErrUnsigned
 	}
@@ -125,31 +130,34 @@ func (c *Client) fetch(ctx context.Context, legalEntityID, vendorID, path, duty 
 	if !ok {
 		return nil, fmt.Errorf("%w: no principal in context", ErrConfig)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+fmt.Sprintf(path, url.PathEscape(vendorID)), nil)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+target, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("party: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{duty}); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrConfig, err)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		slog.ErrorContext(ctx, "party request failed", "err", err, "vendorId", vendorID, "correlationId", middleware.GetReqID(ctx))
+		slog.ErrorContext(ctx, "party request failed", "err", err, "target", target, "correlationId", middleware.GetReqID(ctx))
 		return nil, fmt.Errorf("party: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
-		slog.ErrorContext(ctx, "party read failed", "err", err, "vendorId", vendorID, "correlationId", middleware.GetReqID(ctx))
+		slog.ErrorContext(ctx, "party read failed", "err", err, "target", target, "correlationId", middleware.GetReqID(ctx))
 		return nil, fmt.Errorf("party: %w", err)
 	}
 	switch resp.StatusCode {
 	case http.StatusOK:
 		return raw, nil
 	case http.StatusNotFound:
-		return nil, ErrVendorNotFound
+		return nil, notFound
 	default:
-		slog.ErrorContext(ctx, "party rejected the vendor request", "status", resp.StatusCode, "path", path, "vendorId", vendorID, "correlationId", middleware.GetReqID(ctx))
+		slog.ErrorContext(ctx, "party rejected the request", "status", resp.StatusCode, "target", target, "correlationId", middleware.GetReqID(ctx))
 		return nil, &StatusError{Status: resp.StatusCode}
 	}
 }

@@ -127,6 +127,10 @@ def main(argv=None):
     if args.dry_run:
         print("---\n" + yaml.safe_dump(smoke_user(rows), sort_keys=False))
         return 0
+    if not args.context:
+        print("refusing to run: pass --context <dev cluster context>; the current kubectl context may be another cluster",
+              file=sys.stderr)
+        return 2
     kube = Kube(args.context)
     failed = []
     try:

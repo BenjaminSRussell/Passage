@@ -366,3 +366,31 @@ func TestTamperedRowFailsVerification(t *testing.T) {
 		t.Fatalf("range after the removed row: %+v %v", chain, err)
 	}
 }
+
+func TestApprovalOfPendingAccountIsRecordedAsStatusChangeByApprover(t *testing.T) {
+	e := setup(t)
+	t1 := testkit.TenantID(1)
+	pending := account(t1, "b-p", le1, "Acme GmbH", "4821")
+	pending["status"] = "pending"
+	active := account(t1, "b-p", le1, "Acme GmbH", "4821")
+	active["status"] = "active"
+	approver := auditctx.Message{V: auditctx.Version, TenantID: t1, Actor: "bea", ActorKind: auditctx.ActorPerson,
+		Reason: "second approver", TraceID: "trace-830", ChangeSetID: "cs-830"}
+	parked := e.consume(t,
+		ctxRecord(t, 812, 1000, person(1)),
+		changeRecord(t, "c", 812, 1010, nil, pending),
+		ctxRecord(t, 830, 3000, approver),
+		changeRecord(t, "u", 830, 3010, pending, active),
+	)
+	if len(parked.parked) != 0 {
+		t.Fatalf("dead-lettered %v", parked.parked)
+	}
+	got, err := e.store.Query(reader(1, le1), "vendor_bank_account", "b-p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := got[len(got)-1]
+	if last.Field != "status" || last.OldValue != "pending" || last.NewValue != "active" || last.UserID != "bea" || last.Reason != "second approver" {
+		t.Fatalf("approval: %+v", last)
+	}
+}

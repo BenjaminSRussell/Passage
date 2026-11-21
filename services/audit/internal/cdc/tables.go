@@ -59,6 +59,7 @@ var Tables = []Table{
 			{Column: "bank_country", Name: "bankCountry"},
 			{Column: "currency_code", Name: "currencyCode"},
 			{Column: "account_last4", Name: "accountLast4"},
+			{Column: "status", Name: "status"},
 		},
 	},
 }

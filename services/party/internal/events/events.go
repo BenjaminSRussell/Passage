@@ -25,6 +25,7 @@ var (
 	MergeRejected  = events.Type(Context, "merge", "rejected", 1)
 
 	VendorBankRevealed = events.Type(Context, "vendorbank", "revealed", 1)
+	VendorBankChanged  = events.Type(Context, "vendorbank", "changed", 1)
 	VendorGroupCreated = events.Type(Context, "vendorgroup", "created", 1)
 
 	VendorInviteCreated  = events.Type(Context, "vendorinvite", "created", 1)
@@ -32,7 +33,7 @@ var (
 )
 
 func All() []string {
-	return []string{PartyCreated, PartyUpdated, domain.PartyMergedType, CustomerCreated, CustomerUpdated, ChangeRequested, ChangeApproved, ChangeRejected, ProtectedFieldsUpdated, MergeRequested, MergeRejected, VendorBankRevealed, VendorGroupCreated, VendorInviteCreated, VendorInviteAccepted}
+	return []string{PartyCreated, PartyUpdated, domain.PartyMergedType, CustomerCreated, CustomerUpdated, ChangeRequested, ChangeApproved, ChangeRejected, ProtectedFieldsUpdated, MergeRequested, MergeRejected, VendorBankRevealed, VendorBankChanged, VendorGroupCreated, VendorInviteCreated, VendorInviteAccepted}
 }
 
 type CustomerCreatedData struct {
@@ -80,6 +81,18 @@ type VendorBankRevealedData struct {
 	ActorService  string    `json:"actor_service,omitempty"`
 	AccountCount  int       `json:"account_count"`
 	RevealedAt    time.Time `json:"revealed_at"`
+}
+
+type VendorBankChangedData struct {
+	VendorID       string   `json:"vendor_id"`
+	LegalEntityID  string   `json:"legal_entity_id"`
+	BankAccountID  string   `json:"bank_account_id"`
+	ChangeID       string   `json:"change_id"`
+	NewLast4       string   `json:"new_last4"`
+	ReplacedLast4  []string `json:"replaced_last4"`
+	RequestedBy    string   `json:"requested_by"`
+	ApprovedBy     string   `json:"approved_by"`
+	NoticeRequired bool     `json:"notice_required"`
 }
 
 type PartyCreatedData struct {

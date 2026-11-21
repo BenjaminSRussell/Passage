@@ -276,6 +276,7 @@ components:
         qty: { type: string, description: Decimal string }
         uom: { type: string }
         quality_order_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
     CAPAClosedData:
       type: object
       required: [ncr_id, correction_id, effectiveness_result, reopened, closed_at]

@@ -5,7 +5,7 @@ import { clearResolvedOptions, rememberOption, setLookupFetcher } from "../looku
 import { WorkContext } from "../lookup/workContextState";
 import type { PreferenceStorage } from "../preferenceStorage";
 import { pageViolations } from "../testing/fakeServer";
-import { ListPage, type ListColumn, type ListData } from "./ListPage";
+import { ListPage, type BulkAction, type BulkResult, type ListColumn, type ListData } from "./ListPage";
 import { viewStoreKey, type ListFilterDef, type ListQuery } from "./listViews";
 
 interface Row {
@@ -801,5 +801,197 @@ describe("loadedRows", () => {
     expect(isForbidden({ code: "COM-0500" })).toBe(false);
     expect(loadedRows({ data: null, loading: false, error: { code: "AUTH-0003" }, reload: () => undefined }).forbidden).toBe(true);
     expect(loadedRows({ data: [1], loading: false, reload: () => undefined })).toMatchObject({ rows: [1], forbidden: false, hasMore: false });
+  });
+});
+
+describe("ListPage bulk actions and paste", () => {
+  const ok = (keys: string[]): BulkResult => ({ done: keys, failed: [] });
+  const bulkProps = (run: BulkAction<Row>["run"], extra: Partial<BulkAction<Row>> = {}) => ({
+    bulk: [{ id: "pay", label: "Pay selected", run, ...extra }],
+    rowLabel: (r: Row) => r.number,
+  });
+  const rowBox = (name: string) => screen.getByRole("checkbox", { name: `Select ${name}` });
+
+  it("shows no checkboxes and no bar without bulk, and no bar until a row is picked", async () => {
+    renderList();
+    expect(screen.queryAllByRole("checkbox")).toEqual([]);
+    cleanup();
+    renderList(memory(), bulkProps(vi.fn()));
+    expect(screen.queryByRole("region", { name: "Actions for the selected rows" })).toBeNull();
+    await userEvent.setup().click(rowBox("INV-10"));
+    expect(screen.getByRole("region", { name: "Actions for the selected rows" })).toBeInTheDocument();
+  });
+
+  it("hands run only the selected rows and reports the count", async () => {
+    const user = userEvent.setup();
+    const run = vi.fn(async (picked: Row[]) => ok(picked.map((r) => r.id)));
+    renderList(memory(), bulkProps(run));
+    await user.click(rowBox("INV-10"));
+    await user.click(rowBox("=EVIL()"));
+    expect(screen.getAllByText("2 of 3 invoices selected").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][0].map((r) => r.id)).toEqual(["1", "3"]);
+    expect(await screen.findByText("Done for 2 invoices.")).toBeInTheDocument();
+  });
+
+  it("selects only the shown rows with the header checkbox and sets it indeterminate for a partial pick", async () => {
+    const user = userEvent.setup();
+    const run = vi.fn(async (picked: Row[]) => ok(picked.map((r) => r.id)));
+    renderList(memory(), { ...bulkProps(run), search: (r: Row) => ({ number: r.number }) });
+    await user.click(rowBox("INV-10"));
+    expect((screen.getByRole("checkbox", { name: "Select all rows" }) as HTMLInputElement).indeterminate).toBe(true);
+    await user.type(screen.getByRole("searchbox", { name: "Search invoices" }), "INV-9");
+    await user.click(screen.getByRole("checkbox", { name: "Select all rows" }));
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    expect(run.mock.calls[0][0].map((r) => r.id)).toEqual(["2"]);
+  });
+
+  it("keeps only the failed rows selected and lists each reason", async () => {
+    const user = userEvent.setup();
+    const run = vi.fn(async (): Promise<BulkResult> => ({ done: ["1", "2"], failed: [{ key: "3", reason: "On hold" }] }));
+    renderList(memory(), bulkProps(run));
+    await user.click(screen.getByRole("checkbox", { name: "Select all rows" }));
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    expect(await screen.findByText("=EVIL(): On hold")).toBeInTheDocument();
+    expect(screen.getByText("2 done, 1 not changed. The rows that failed are still selected.")).toBeInTheDocument();
+    expect(rowBox("=EVIL()")).toBeChecked();
+    expect(rowBox("INV-10")).not.toBeChecked();
+  });
+
+  it("shows a rejected run as a problem, keeps the selection and offers no undo", async () => {
+    const user = userEvent.setup();
+    const run = vi.fn(async (): Promise<BulkResult> => {
+      throw { status: 403, code: "AUTH-0003", message: "missing duty" };
+    });
+    renderList(memory(), bulkProps(run, { undo: vi.fn() }));
+    await user.click(rowBox("INV-10"));
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    expect(await screen.findByText("That did not finish")).toBeInTheDocument();
+    expect(rowBox("INV-10")).toBeChecked();
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("treats a result without done and failed arrays as a failure", async () => {
+    const user = userEvent.setup();
+    renderList(memory(), bulkProps((async () => undefined) as unknown as BulkAction<Row>["run"]));
+    await user.click(rowBox("INV-10"));
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    expect(await screen.findByText("That did not finish")).toBeInTheDocument();
+  });
+
+  it("asks first when the action has a confirmation and runs nothing on cancel", async () => {
+    const user = userEvent.setup();
+    const run = vi.fn(async (picked: Row[]) => ok(picked.map((r) => r.id)));
+    renderList(memory(), bulkProps(run, { confirm: { title: "Pay 1 invoice?", description: "This cannot be undone.", confirmLabel: "Pay" } }));
+    await user.click(rowBox("INV-10"));
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(run).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    await user.click(screen.getByRole("button", { name: "Pay" }));
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a selected row that a reload removes, so it never reaches run", async () => {
+    const user = userEvent.setup();
+    const run = vi.fn(async (picked: Row[]) => ok(picked.map((r) => r.id)));
+    const { rerender, tree } = renderList(memory(), bulkProps(run));
+    await user.click(rowBox("INV-10"));
+    await user.click(rowBox("INV-9"));
+    source = { rows: rows.slice(1) };
+    rerender(tree());
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    expect(run.mock.calls[0][0].map((r) => r.id)).toEqual(["2"]);
+  });
+
+  it("undoes a bulk run once, and announces an undo that fails", async () => {
+    const user = userEvent.setup();
+    const undo = vi.fn(async () => undefined);
+    renderList(memory(), bulkProps(async (picked) => ok(picked.map((r) => r.id)), { undo }));
+    await user.click(rowBox("INV-10"));
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    await user.click(await screen.findByRole("button", { name: "Undo" }));
+    expect(undo).toHaveBeenCalledWith(["1"]);
+    expect(await screen.findByText("Undone.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    cleanup();
+
+    const failing = vi.fn(async () => {
+      throw new Error("Already paid");
+    });
+    renderList(memory(), bulkProps(async (picked) => ok(picked.map((r) => r.id)), { undo: failing }));
+    await user.click(rowBox("INV-10"));
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    await user.click(await screen.findByRole("button", { name: "Undo" }));
+    expect(await screen.findByText("Could not undo")).toBeInTheDocument();
+    expect(screen.queryByText("Undone.")).toBeNull();
+  });
+
+  it("offers no undo for an action that supplies none", async () => {
+    const user = userEvent.setup();
+    renderList(memory(), bulkProps(async (picked) => ok(picked.map((r) => r.id))));
+    await user.click(rowBox("INV-10"));
+    await user.click(screen.getByRole("button", { name: "Pay selected" }));
+    await screen.findByText("Done for 1 invoice.");
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("renders no table, checkboxes or bar when the list is forbidden", () => {
+    source = { rows: [], forbidden: true };
+    renderList(memory(), bulkProps(vi.fn()));
+    expect(screen.queryAllByRole("checkbox")).toEqual([]);
+    expect(screen.queryByRole("region", { name: "Actions for the selected rows" })).toBeNull();
+  });
+
+  it("has no accessibility violations with a selection and the bar showing", async () => {
+    const user = userEvent.setup();
+    const { container } = renderList(memory(), bulkProps(vi.fn()));
+    await user.click(rowBox("INV-10"));
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("applies a valid paste once and refuses to apply while a row is invalid", async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn(async (pasted: Record<string, unknown>[]) => ok(pasted.map((_, i) => String(i))));
+    const paste = {
+      fields: [
+        { key: "number", header: "Number" },
+        { key: "amount", header: "Amount", parse: (cell: string) => Number(cell) },
+      ],
+      onCommit,
+    };
+    renderList(memory(), { paste });
+    await user.click(screen.getByRole("button", { name: "Paste rows" }));
+    const dialog = screen.getByRole("dialog", { name: "Paste rows from a spreadsheet" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Pasted rows" }), { target: { value: "INV-1\tabc\nINV-2\t5" } });
+    expect(within(dialog).getByRole("button", { name: "Apply 2 rows" })).toBeDisabled();
+    expect(within(dialog).getByText("Amount is not a number")).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Pasted rows" }), { target: { value: "Number\tAmount\nINV-1\t4\nINV-2\t5" } });
+    await user.click(within(dialog).getByRole("button", { name: "Apply 2 rows" }));
+    expect(onCommit).toHaveBeenCalledWith([
+      { number: "INV-1", amount: 4 },
+      { number: "INV-2", amount: 5 },
+    ]);
+    expect(await screen.findByText("Done for 2 invoices.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("closes the paste dialog with Escape and returns focus to the button", async () => {
+    const user = userEvent.setup();
+    renderList(memory(), { paste: { fields: [{ key: "number", header: "Number" }], onCommit: vi.fn() } });
+    const open = screen.getByRole("button", { name: "Paste rows" });
+    await user.click(open);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(open).toHaveFocus();
+  });
+
+  it("has no accessibility violations with the paste dialog and a preview open", async () => {
+    const user = userEvent.setup();
+    const { container } = renderList(memory(), { paste: { fields: [{ key: "number", header: "Number" }], onCommit: vi.fn() } });
+    await user.click(screen.getByRole("button", { name: "Paste rows" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Pasted rows" }), { target: { value: "INV-1" } });
+    expect(pageViolations(container)).toEqual([]);
   });
 });

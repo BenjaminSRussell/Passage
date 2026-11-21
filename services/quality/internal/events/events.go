@@ -133,6 +133,7 @@ type NonconformanceCreatedData struct {
 	Qty            string `json:"qty"`
 	UOM            string `json:"uom"`
 	QualityOrderID string `json:"quality_order_id,omitempty"`
+	LegalEntityID  string `json:"legal_entity_id,omitempty"`
 }
 
 // CAPAClosedData is the data member of dev.depot.quality.capa.closed.v1: the 8D

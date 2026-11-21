@@ -1,0 +1,16 @@
+{
+  "files": [
+    "modules/ap-invoices/GrirPage.tsx",
+    "modules/costing/ValuationLedgersPage.tsx",
+    "modules/costing/ValuationSetupPage.tsx",
+    "modules/fulfillment/ReleasePage.tsx",
+    "modules/ledger/OpenItemsPage.tsx",
+    "modules/processmfg/BatchQualityPages.tsx",
+    "modules/productcost/ConversionPage.tsx",
+    "modules/productcost/MixedCostPage.tsx",
+    "modules/projects/PlanPages.tsx",
+    "modules/purchasing/ConsolidationPage.tsx",
+    "modules/purchasing/RfqPages.tsx",
+    "modules/sales/QuotationDetailPage.tsx"
+  ]
+}

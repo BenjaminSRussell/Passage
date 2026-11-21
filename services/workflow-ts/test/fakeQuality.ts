@@ -11,7 +11,7 @@ interface Step {
 
 export interface FakeNcr {
   id: string;
-  status: "APPROVED" | "IN_CORRECTION" | "CLOSED";
+  status: "NEW" | "APPROVED" | "REFUSED" | "IN_CORRECTION" | "CLOSED";
   version: number;
   correction?: {
     status: "OPEN" | "EFFECTIVENESS_PENDING" | "CLOSED";

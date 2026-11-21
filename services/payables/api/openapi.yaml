@@ -1003,7 +1003,7 @@ components:
         invoiceNumber: { type: string }
         invoiceDate: { type: string, format: date }
         dueDate: { type: string, format: date }
-        dueDateSource: { type: string, enum: [EVENT, DEFAULTED, OPENING], description: "OPENING marks an item loaded at cutover by an opening batch." }
+        dueDateSource: { type: string, enum: [EVENT, DEFAULTED, OPENING, TERMS], description: "OPENING marks an item loaded at cutover by an opening batch; TERMS marks due and discount dates computed from the party payment term." }
         currency: { type: string }
         amount: { type: string }
         openAmount: { type: string }

@@ -138,6 +138,7 @@ func TestVendorBank_SealedAtRestMaskedByDefaultRevealedOnRequest(t *testing.T) {
 	if err != nil || added.AccountLast4 != "3000" || added.AccountNumber != "" || added.RoutingNumber != "" {
 		t.Fatalf("add = %+v, %v; want last4 only", added, err)
 	}
+	approveBank(t, s, legalEntityA, added)
 
 	f := mergeFixture{app: app, ctx: principalContext(1, "")}
 	for _, column := range []string{"account_number_sealed", "routing_number_sealed"} {
@@ -179,9 +180,11 @@ func TestVendorBank_CiphertextIsBoundToFieldAndTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := domain.NewBankAccount{AccountHolder: "Acme", BankCountry: "US", CurrencyCode: "USD", AccountNumber: "000123456789", RoutingNumber: "021000021"}.Clean()
-	if _, err := s.AddBankAccount(ctx, vendor.ID, in); err != nil {
+	added, err := s.AddBankAccount(ctx, vendor.ID, in)
+	if err != nil {
 		t.Fatal(err)
 	}
+	approveBank(t, s, legalEntityA, added)
 	if _, err := admin.Exec(context.Background(), `update vendor_bank_account set routing_number_sealed = account_number_sealed`); err != nil {
 		t.Fatal(err)
 	}
@@ -230,9 +233,11 @@ func TestMerge_MovesVendorRolesWithBankAccountsAndAuditStaysClean(t *testing.T) 
 		t.Fatal(err)
 	}
 	in := domain.NewBankAccount{AccountHolder: "Acme", BankCountry: "US", CurrencyCode: "USD", AccountNumber: "000123456789"}.Clean()
-	if _, err := s.AddBankAccount(loserCtx, vendor.ID, in); err != nil {
+	added, err := s.AddBankAccount(loserCtx, vendor.ID, in)
+	if err != nil {
 		t.Fatal(err)
 	}
+	approveBank(t, s, legalEntityB, added)
 	before, err := s.Audit(f.merger)
 	if err != nil || !before.Clean() || before.VendorRoles != 1 {
 		t.Fatalf("pre-merge audit = %+v, %v", before, err)
@@ -314,9 +319,11 @@ func TestVendorBank_RevealWritesDurableAuditWithoutAccountData(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := domain.NewBankAccount{AccountHolder: "Acme", BankCountry: "US", CurrencyCode: "USD", AccountNumber: "000123456789"}.Clean()
-	if _, err := s.AddBankAccount(ctx, vendor.ID, in); err != nil {
+	added, err := s.AddBankAccount(ctx, vendor.ID, in)
+	if err != nil {
 		t.Fatal(err)
 	}
+	approveBank(t, s, legalEntityA, added)
 	f := mergeFixture{app: app, ctx: principalContext(1, "")}
 	const revealed = `select count(*)::text from outbox where type = 'dev.depot.party.vendorbank.revealed.v1'`
 	if _, err := s.ListBankAccounts(ctx, vendor.ID, false); err != nil || scalar(t, f, revealed) != "0" {

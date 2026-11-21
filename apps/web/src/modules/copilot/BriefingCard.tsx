@@ -8,6 +8,7 @@ import { holdsDuty } from "../../shell/dutyGate";
 import { formatDateTime } from "../../shell/format";
 import { usePrincipalDuties, usePrincipalIdentity } from "../../shell/principal";
 import { Alert, Badge, Button, Card, EmptyState, Skeleton } from "../../shell/ui";
+import { isAiUnavailable } from "./api/client";
 import { briefingItemRoute, generateBriefing, listBriefings, markBriefingRead, type Briefing, type BriefingItem, type BriefingList } from "./api/briefings";
 import styles from "./BriefingCard.module.css";
 import { GENERATED_BADGE } from "./domain";
@@ -229,6 +230,8 @@ export function BriefingCard() {
           <span className="visually-hidden">{copy.briefing.loading}</span>
           <Skeleton height="tile" />
         </div>
+      ) : list === null && isAiUnavailable(state.failure) ? (
+        <p>{copy.briefing.unavailable}</p>
       ) : list === null ? (
         <Alert tone="danger" live="alert" title={copy.briefing.errorTitle} action={<Button onClick={state.reload}>{copy.briefing.retry}</Button>}>
           {copy.briefing.errorBody}

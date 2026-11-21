@@ -473,14 +473,14 @@ paths:
     post:
       operationId: addVendorBankAccount
       x-depot-duty: party.vendor-bank.write
-      description: Stores a bank account; account and routing numbers are encrypted per tenant and field. Needs X-Depot-User. 503 PTY-BANK-ENCRYPTION-UNAVAILABLE when no field encryption keys are configured.
+      description: Stores a bank account as pending; account and routing numbers are encrypted per tenant and field. A second person approves it through POST /v1/party/pending-changes/{id}:approve (the requester gets 403 PTY-PENDING-SELF-APPROVAL); until then the account is not on the reveal route that payables reads. Needs X-Depot-User. 503 PTY-BANK-ENCRYPTION-UNAVAILABLE when no field encryption keys are configured.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/NewBankAccount' }
       responses:
-        '201': { description: 'The account, masked.', content: { application/json: { schema: { $ref: '#/components/schemas/BankAccount' } } } }
+        '202': { description: 'The pending account, masked, with pendingChangeId.', content: { application/json: { schema: { $ref: '#/components/schemas/BankAccount' } } } }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PTY-VENDOR-NOT-FOUND., content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -1543,6 +1543,89 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+    post:
+      operationId: createPaymentTerm
+      summary: "Create a payment term"
+      x-depot-duty: party.write
+      x-depot-duty-alternatives: [party.import.write]
+      description: Exactly one of netDays and dayOfMonth. A day-of-month term falls due on that day (clamped to the month end) offsetMonths months after the document date. Up to three discount tiers; calendarId names a payment calendar that shifts the due date. The code is upper-cased and unique per tenant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                code: { type: string, pattern: '^[A-Z0-9_-]{1,20}$' }
+                name: { type: string, maxLength: 100 }
+                netDays: { type: integer, minimum: 0, maximum: 3650 }
+                dayOfMonth: { type: integer, minimum: 1, maximum: 31 }
+                offsetMonths: { type: integer, minimum: 0, maximum: 120 }
+                discounts:
+                  type: array
+                  maxItems: 3
+                  items:
+                    type: object
+                    required: [percent, days]
+                    properties:
+                      percent: { type: number, exclusiveMinimum: 0, maximum: 100 }
+                      days: { type: integer, minimum: 0, maximum: 3650 }
+                calendarId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: The payment term.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentTerm' }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-TERM-EXISTS.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-TERM-INVALID; errors names each failing field, calendarId when the calendar does not exist.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/payment-calendars:
+    post:
+      operationId: createPaymentCalendar
+      summary: "Create a payment calendar"
+      x-depot-duty: party.write
+      x-depot-duty-alternatives: [party.import.write]
+      description: Weekend days (0 Sunday to 6 Saturday, default Saturday and Sunday) and holiday dates make non-business days. shift is following (default), preceding or modified_following (following unless that crosses into the next month, then preceding). The code is upper-cased and unique per tenant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                code: { type: string, pattern: '^[A-Z0-9_-]{1,20}$' }
+                name: { type: string, maxLength: 100 }
+                holidays: { type: array, items: { type: string, format: date } }
+                weekendDays: { type: array, maxItems: 6, items: { type: integer, minimum: 0, maximum: 6 } }
+                shift: { type: string, enum: [following, preceding, modified_following] }
+      responses:
+        '201':
+          description: The payment calendar.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, code, name, holidays, weekendDays, shift, version]
+                properties:
+                  id: { type: string, format: uuid }
+                  code: { type: string }
+                  name: { type: string }
+                  holidays: { type: array, items: { type: string, format: date } }
+                  weekendDays: { type: array, items: { type: integer } }
+                  shift: { type: string, enum: [following, preceding, modified_following] }
+                  version: { type: integer }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'PTY-CALENDAR-EXISTS.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-CALENDAR-INVALID; errors names each failing field.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
   /v1/party/payment-terms/{id}:
     get:
       operationId: getPaymentTerm
@@ -1559,6 +1642,48 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
         '404': { $ref: '#/components/responses/Problem', description: 'PTY-PAYMENT-TERM-NOT-FOUND.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
+  /v1/party/payment-terms/{id}:due-dates:
+    post:
+      operationId: paymentTermDueDates
+      summary: "Compute the due and discount dates of a payment term"
+      x-depot-duty: party.read
+      x-depot-duty-alternatives: [party.vendor.lookup]
+      description: The due date from the term's net days or day of month, moved by the term's payment calendar when it has one; each discount tier gives a percent and the document date plus its days (discount dates are not shifted). Payables calls this with party.vendor.lookup when an invoice.posted event names a payment_term_id and carries no due date.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documentDate]
+              properties:
+                documentDate: { type: string, format: date }
+      responses:
+        '200':
+          description: The dates.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dueDate, discounts]
+                properties:
+                  dueDate: { type: string, format: date }
+                  discounts:
+                    type: array
+                    items:
+                      type: object
+                      required: [percent, date]
+                      properties:
+                        percent: { type: number }
+                        date: { type: string, format: date }
+        '400': { $ref: '#/components/responses/Problem', description: 'Malformed JSON.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'PTY-PAYMENT-TERM-NOT-FOUND.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PTY-TERM-INVALID: documentDate is missing or not a date.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500.' }
   /v1/party/posting-profiles:
     get:
@@ -1881,7 +2006,7 @@ components:
         routingNumber: { type: string }
     BankAccount:
       type: object
-      required: [id, vendorId, accountHolder, bankCountry, currencyCode, accountLast4]
+      required: [id, vendorId, accountHolder, bankCountry, currencyCode, accountLast4, status]
       properties:
         id: { type: string, format: uuid }
         vendorId: { type: string, format: uuid }
@@ -1889,6 +2014,8 @@ components:
         bankCountry: { type: string }
         currencyCode: { type: string }
         accountLast4: { type: string }
+        status: { type: string, enum: [pending, active, rejected] }
+        pendingChangeId: { type: string, format: uuid, description: Only on the response to an add. }
         accountNumber: { type: string, description: Only on the reveal route. }
         routingNumber: { type: string, description: Only on the reveal route. }
     ValidateTaxRegistration:
@@ -2013,14 +2140,16 @@ components:
         reason: { type: string, maxLength: 500 }
     PendingChange:
       type: object
-      required: [id, customerId, legalEntityId, field, currentValue, requestedValue, status, requestedBy, requestedAt]
+      required: [id, legalEntityId, field, currentValue, status, requestedBy, requestedAt]
       properties:
         id: { type: string, format: uuid }
-        customerId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid, description: Set for credit_limit. }
+        vendorId: { type: string, format: uuid, description: Set for vendor_bank_account. }
+        bankAccountId: { type: string, format: uuid, description: Set for vendor_bank_account. }
         legalEntityId: { type: string, format: uuid }
-        field: { type: string, enum: [credit_limit] }
+        field: { type: string, enum: [credit_limit, vendor_bank_account] }
         currentValue: { type: [string, 'null'] }
-        requestedValue: { type: string }
+        requestedValue: { type: string, description: Set for credit_limit. }
         status: { type: string, enum: [pending, approved, rejected] }
         requestedBy: { type: string }
         decidedBy: { type: string }

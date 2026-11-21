@@ -2,9 +2,31 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { holdsDuty } from "../../shell/dutyGate";
 import { usePrincipalDuties } from "../../shell/principal";
-import { Alert, Button, buttonClassName, Card, ConfirmDialog, FormField, PageHeader, Skeleton, StatusPill, Textarea } from "../../shell/ui";
-import { decidePendingChange, describeProblem, getPendingChange, type PendingChange, type Problem } from "./api/client";
-import { displayOrDash, DUTY_APPROVE, formatDateTime, pendingFieldLabel } from "./format";
+import {
+  Alert,
+  Button,
+  buttonClassName,
+  Card,
+  ConfirmDialog,
+  FormField,
+  PageHeader,
+  Skeleton,
+  StatusPill,
+  Textarea,
+} from "../../shell/ui";
+import {
+  decidePendingChange,
+  describeProblem,
+  getPendingChange,
+  type PendingChange,
+  type Problem,
+} from "./api/client";
+import {
+  displayOrDash,
+  DUTY_APPROVE,
+  formatDateTime,
+  pendingFieldLabel,
+} from "./format";
 import styles from "./pages.module.css";
 import { Entry, problemText, ProblemAlert } from "./parts";
 import { useLoad } from "./useLoad";
@@ -13,18 +35,40 @@ import { UserName } from "../../shell/lookup/UserName";
 
 const REASON_MAX = 500;
 
-type Outcome = { tone: "success"; text: string } | { tone: "danger"; problem: Problem };
+type Outcome =
+  { tone: "success"; text: string } | { tone: "danger"; problem: Problem };
 
 function facts(change: PendingChange): [string, ReactNode][] {
   return [
     ["Field", pendingFieldLabel[change.field] ?? change.field],
     ["Current value", displayOrDash(change.currentValue)],
     ["Requested value", change.requestedValue],
-    ["Customer", change.customerId],
+    [
+      change.customerId ? "Customer" : "Vendor",
+      change.customerId ?? change.vendorId,
+    ],
     ["Legal entity", change.legalEntityId],
-    ["Requested by", <><UserName id={change.requestedBy} /> at {formatDateTime(change.requestedAt)}</>],
-    ...(change.decidedAt ? ([["Decided", <><UserName id={change.decidedBy} /> at {formatDateTime(change.decidedAt)}</>]] as [string, ReactNode][]) : []),
-    ...(change.reason ? ([["Reason", change.reason]] as [string, ReactNode][]) : []),
+    [
+      "Requested by",
+      <>
+        <UserName id={change.requestedBy} /> at{" "}
+        {formatDateTime(change.requestedAt)}
+      </>,
+    ],
+    ...(change.decidedAt
+      ? ([
+          [
+            "Decided",
+            <>
+              <UserName id={change.decidedBy} /> at{" "}
+              {formatDateTime(change.decidedAt)}
+            </>,
+          ],
+        ] as [string, ReactNode][])
+      : []),
+    ...(change.reason
+      ? ([["Reason", change.reason]] as [string, ReactNode][])
+      : []),
   ];
 }
 
@@ -42,7 +86,9 @@ function PendingChangeDetail({ id }: { id: string }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [confirming, setConfirming] = useState<"approve" | "reject" | null>(null);
+  const [confirming, setConfirming] = useState<"approve" | "reject" | null>(
+    null,
+  );
   const outcomeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -61,13 +107,18 @@ function PendingChangeDetail({ id }: { id: string }) {
     try {
       const change = state.data;
       if (!change) return;
+      const isBank = change.field === "vendor_bank_account";
       await decidePendingChange(change.id, action, text);
       setOutcome({
         tone: "success",
         text:
           action === "approve"
-            ? "Approved. The stored credit limit is now the requested value."
-            : "Rejected. The stored credit limit is unchanged.",
+            ? isBank
+              ? "Approved. The bank account is now active."
+              : "Approved. The stored credit limit is now the requested value."
+            : isBank
+              ? "Rejected. The bank account stays inactive."
+              : "Rejected. The stored credit limit is unchanged.",
       });
       setReason("");
       state.reload();
@@ -84,12 +135,19 @@ function PendingChangeDetail({ id }: { id: string }) {
         <PageHeader
           title="Credit limit change"
           actions={
-            <Link className={buttonClassName("ghost")} to="/party/pending-changes">
+            <Link
+              className={buttonClassName("ghost")}
+              to="/party/pending-changes"
+            >
               Back to credit limit approvals
             </Link>
           }
         />
-        <ProblemAlert problem={state.error} title="Could not load the change" retry={state.reload} />
+        <ProblemAlert
+          problem={state.error}
+          title="Could not load the change"
+          retry={state.reload}
+        />
       </div>
     );
   }
@@ -97,7 +155,9 @@ function PendingChangeDetail({ id }: { id: string }) {
     return (
       <div className={styles.stack} aria-busy="true">
         <PageHeader title="Credit limit change" />
-        <span className="visually-hidden">Loading the credit limit change…</span>
+        <span className="visually-hidden">
+          Loading the credit limit change…
+        </span>
         <Skeleton height="tile" />
       </div>
     );
@@ -105,6 +165,7 @@ function PendingChangeDetail({ id }: { id: string }) {
 
   const change = state.data;
   const pending = change.status === "pending";
+  const isBank = change.field === "vendor_bank_account";
 
   return (
     <div className={styles.stack}>
@@ -112,7 +173,10 @@ function PendingChangeDetail({ id }: { id: string }) {
         title="Credit limit change"
         meta={<StatusPill status={change.status} />}
         actions={
-          <Link className={buttonClassName("ghost")} to="/party/pending-changes">
+          <Link
+            className={buttonClassName("ghost")}
+            to="/party/pending-changes"
+          >
             Back to credit limit approvals
           </Link>
         }
@@ -120,15 +184,28 @@ function PendingChangeDetail({ id }: { id: string }) {
       <div role="status" ref={outcomeRef} tabIndex={-1}>
         {outcome?.tone === "danger" ? (
           <Alert tone="danger" title="The decision failed">
-            <ProblemMessage problem={outcome.problem} message={problemText(outcome.problem)} />
+            <ProblemMessage
+              problem={outcome.problem}
+              message={problemText(outcome.problem)}
+            />
           </Alert>
         ) : null}
-        {outcome?.tone === "success" ? <Alert tone="success">{outcome.text}</Alert> : null}
+        {outcome?.tone === "success" ? (
+          <Alert tone="success">{outcome.text}</Alert>
+        ) : null}
       </div>
       <Card>
         <dl className={styles.details} aria-label="Credit limit change">
           {facts(change).map(([term, value]) => (
-            <Entry key={term} term={term} mono={term === "Customer" || term === "Legal entity"}>
+            <Entry
+              key={term}
+              term={term}
+              mono={
+                term === "Customer" ||
+                term === "Vendor" ||
+                term === "Legal entity"
+              }
+            >
               {value}
             </Entry>
           ))}
@@ -137,7 +214,12 @@ function PendingChangeDetail({ id }: { id: string }) {
       {pending ? (
         <Card title="Decision">
           {canDecide ? (
-            <form className={styles.form} onSubmit={(event) => event.preventDefault()} noValidate aria-label="Decision">
+            <form
+              className={styles.form}
+              onSubmit={(event) => event.preventDefault()}
+              noValidate
+              aria-label="Decision"
+            >
               <FormField
                 id="decision-reason"
                 label="Reason"
@@ -178,21 +260,34 @@ function PendingChangeDetail({ id }: { id: string }) {
               </div>
             </form>
           ) : (
-            <p className={styles.muted}>Deciding a credit-limit change needs the party.approve duty.</p>
+            <p className={styles.muted}>
+              Deciding a credit-limit change needs the party.approve duty.
+            </p>
           )}
         </Card>
       ) : (
-        <p className={styles.note}>This change is already {change.status}. The stored limit is not waiting on a decision.</p>
+        <p className={styles.note}>
+          This change is already {change.status}. The stored limit is not
+          waiting on a decision.
+        </p>
       )}
       {confirming ? (
         <ConfirmDialog
-          title={confirming === "approve" ? "Approve this credit limit increase?" : "Reject this credit limit increase?"}
+          title={
+            confirming === "approve"
+              ? "Approve this credit limit increase?"
+              : "Reject this credit limit increase?"
+          }
           description={
             confirming === "approve"
-              ? `The stored credit limit becomes ${change.requestedValue}.`
+              ? isBank
+                ? `The bank account ${change.requestedValue} becomes active for payments.`
+                : `The stored credit limit becomes ${change.requestedValue}.`
               : "The stored credit limit stays unchanged and the request is closed."
           }
-          confirmLabel={confirming === "approve" ? "Confirm approval" : "Confirm rejection"}
+          confirmLabel={
+            confirming === "approve" ? "Confirm approval" : "Confirm rejection"
+          }
           cancelLabel="Cancel"
           onCancel={() => setConfirming(null)}
           onConfirm={() => {

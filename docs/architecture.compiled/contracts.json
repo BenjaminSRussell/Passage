@@ -2,7 +2,7 @@
   "version": 3,
   "compiler": "scripts/compile_architecture.py",
   "note": "Generated from the OpenAPI and AsyncAPI specs and scripts/architecture_patterns.json. Do not edit; run python3 scripts/compile_architecture.py --write.",
-  "summary": {"openapiDocuments": 65, "paths": 2657, "operations": 3285, "asyncapiDocuments": 61, "topics": 393, "topicsPublished": 391, "topicsSubscribed": 23, "patterns": 59},
+  "summary": {"openapiDocuments": 65, "paths": 2659, "operations": 3288, "asyncapiDocuments": 61, "topics": 393, "topicsPublished": 391, "topicsSubscribed": 23, "patterns": 59},
   "patterns": [
     {
       "id": "event-envelope",
@@ -2659,8 +2659,11 @@
         {"method": "GET", "path": "/v1/party/parties:search", "operationId": "searchParties", "duty": "party.read"},
         {"method": "PUT", "path": "/v1/party/partners/{id}/tax-registration", "operationId": "setPartnerTaxRegistration", "duty": "party.write"},
         {"method": "GET", "path": "/v1/party/partners:tax-registrations", "operationId": "listPartnerTaxRegistrations", "duty": "party.read", "dutyAlternatives": ["party.tax-registration.read"]},
+        {"method": "POST", "path": "/v1/party/payment-calendars", "operationId": "createPaymentCalendar", "duty": "party.write", "dutyAlternatives": ["party.import.write"]},
         {"method": "GET", "path": "/v1/party/payment-terms", "operationId": "listPaymentTerms", "duty": "party.read"},
+        {"method": "POST", "path": "/v1/party/payment-terms", "operationId": "createPaymentTerm", "duty": "party.write", "dutyAlternatives": ["party.import.write"]},
         {"method": "GET", "path": "/v1/party/payment-terms/{id}", "operationId": "getPaymentTerm", "duty": "party.read"},
+        {"method": "POST", "path": "/v1/party/payment-terms/{id}:due-dates", "operationId": "paymentTermDueDates", "duty": "party.read", "dutyAlternatives": ["party.vendor.lookup"]},
         {"method": "GET", "path": "/v1/party/pending-changes", "operationId": "listPendingChanges", "duty": "party.read"},
         {"method": "GET", "path": "/v1/party/pending-changes/{id}", "operationId": "getPendingChange", "duty": "party.read"},
         {"method": "POST", "path": "/v1/party/pending-changes/{id}:approve", "operationId": "approvePendingChange", "duty": "party.approve"},
@@ -5091,7 +5094,7 @@
         {"topic": "depot.party.merge", "types": ["dev.depot.party.merge.rejected.v1", "dev.depot.party.merge.requested.v1"]},
         {"topic": "depot.party.party", "types": ["dev.depot.party.party.created.v1", "dev.depot.party.party.merged.v1", "dev.depot.party.party.updated.v1"]},
         {"topic": "depot.party.protectedfields", "types": ["dev.depot.party.protectedfields.updated.v1"]},
-        {"topic": "depot.party.vendorbank", "types": ["dev.depot.party.vendorbank.revealed.v1"]},
+        {"topic": "depot.party.vendorbank", "types": ["dev.depot.party.vendorbank.changed.v1", "dev.depot.party.vendorbank.revealed.v1"]},
         {"topic": "depot.party.vendorgroup", "types": ["dev.depot.party.vendorgroup.created.v1"]},
         {"topic": "depot.party.vendorinvite", "types": ["dev.depot.party.vendorinvite.accepted.v1", "dev.depot.party.vendorinvite.created.v1"]}
       ],

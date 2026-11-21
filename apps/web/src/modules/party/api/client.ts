@@ -7,9 +7,10 @@ const base = "/api/v1/party";
 export type PartyType = "organization" | "person";
 export type PartyStatus = "active" | "inactive" | "merged";
 export type TaxType = "VAT" | "EIN" | "GSTIN";
-export type ValidationStatus = "valid" | "invalid" | "unverified" | "format_only";
+export type ValidationStatus =
+  "valid" | "invalid" | "unverified" | "format_only";
 export type PendingChangeStatus = "pending" | "approved" | "rejected";
-export type PendingChangeField = "credit_limit";
+export type PendingChangeField = "credit_limit" | "vendor_bank_account";
 
 export interface Party {
   id: string;
@@ -62,7 +63,9 @@ export interface TaxValidation {
 
 export interface PendingChange {
   id: string;
-  customerId: string;
+  customerId?: string;
+  vendorId?: string;
+  bankAccountId?: string;
   legalEntityId: string;
   field: PendingChangeField;
   currentValue: string | null;
@@ -118,14 +121,28 @@ async function toError(res: Response): Promise<PartyApiError> {
     title?: unknown;
     errors?: unknown;
   } | null;
-  const code = typeof body?.code === "string" && body.code !== "" ? body.code : `HTTP-${res.status}`;
+  const code =
+    typeof body?.code === "string" && body.code !== ""
+      ? body.code
+      : `HTTP-${res.status}`;
   const message =
-    typeof body?.detail === "string" ? body.detail : typeof body?.title === "string" ? body.title : `Request failed (HTTP ${res.status})`;
-  const fields = body?.errors && typeof body.errors === "object" ? (body.errors as Record<string, string>) : {};
+    typeof body?.detail === "string"
+      ? body.detail
+      : typeof body?.title === "string"
+        ? body.title
+        : `Request failed (HTTP ${res.status})`;
+  const fields =
+    body?.errors && typeof body.errors === "object"
+      ? (body.errors as Record<string, string>)
+      : {};
   return new PartyApiError(res.status, code, message, fields);
 }
 
-async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+async function send<T>(
+  path: string,
+  init: RequestInit = {},
+  signal?: AbortSignal,
+): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
@@ -147,9 +164,21 @@ const post = (body: unknown, key?: string): RequestInit => ({
   headers: key ? { "Idempotency-Key": key } : undefined,
 });
 
-export type PartyNameFields = Partial<Record<"legalName" | "tradeName" | "registrationNumber" | "givenName" | "familyName", string>>;
+export type PartyNameFields = Partial<
+  Record<
+    | "legalName"
+    | "tradeName"
+    | "registrationNumber"
+    | "givenName"
+    | "familyName",
+    string
+  >
+>;
 
-export type PartyReceipt = Pick<Party, "id" | "partyNumber" | "partyType" | "status" | "version">;
+export type PartyReceipt = Pick<
+  Party,
+  "id" | "partyNumber" | "partyType" | "status" | "version"
+>;
 
 export interface NewVendor {
   accountNumber: string;
@@ -178,11 +207,18 @@ export interface CreditLimitResult {
   pendingChange?: PendingChange;
 }
 
-export function createParty(input: { partyType: PartyType } & PartyNameFields, key: string): Promise<PartyReceipt> {
+export function createParty(
+  input: { partyType: PartyType } & PartyNameFields,
+  key: string,
+): Promise<PartyReceipt> {
   return send<PartyReceipt>("/parties", post(input, key));
 }
 
-export function updateParty(partyId: string, version: number, fields: PartyNameFields): Promise<PartyReceipt> {
+export function updateParty(
+  partyId: string,
+  version: number,
+  fields: PartyNameFields,
+): Promise<PartyReceipt> {
   return send<PartyReceipt>(`/parties/${id(partyId)}`, {
     method: "PATCH",
     body: JSON.stringify(fields),
@@ -190,19 +226,36 @@ export function updateParty(partyId: string, version: number, fields: PartyNameF
   });
 }
 
-export function createVendorRole(partyId: string, input: NewVendor, key: string): Promise<Vendor> {
+export function createVendorRole(
+  partyId: string,
+  input: NewVendor,
+  key: string,
+): Promise<Vendor> {
   return send<Vendor>(`/parties/${id(partyId)}/vendor`, post(input, key));
 }
 
-export function createCustomerRole(partyId: string, input: NewCustomer, key: string): Promise<Customer> {
+export function createCustomerRole(
+  partyId: string,
+  input: NewCustomer,
+  key: string,
+): Promise<Customer> {
   return send<Customer>(`/parties/${id(partyId)}/customer`, post(input, key));
 }
 
-export function setCreditLimit(customerId: string, creditLimit: string): Promise<CreditLimitResult> {
-  return send<CreditLimitResult>(`/customers/${id(customerId)}/credit-limit`, post({ creditLimit }));
+export function setCreditLimit(
+  customerId: string,
+  creditLimit: string,
+): Promise<CreditLimitResult> {
+  return send<CreditLimitResult>(
+    `/customers/${id(customerId)}/credit-limit`,
+    post({ creditLimit }),
+  );
 }
 
-export function getParty(partyId: string, signal?: AbortSignal): Promise<Party> {
+export function getParty(
+  partyId: string,
+  signal?: AbortSignal,
+): Promise<Party> {
   return send<Party>(`/parties/${id(partyId)}`, {}, signal);
 }
 
@@ -217,25 +270,45 @@ export interface RoleHit {
 }
 
 /** Customers and vendors by name or number, for browsing; the service caps one page at 50 per role. */
-export async function searchRoles(kind: "all" | "customer" | "vendor", q: string, signal?: AbortSignal): Promise<RoleHit[]> {
-  const kinds = kind === "all" ? (["customer", "vendor"] as const) : ([kind] as const);
+export async function searchRoles(
+  kind: "all" | "customer" | "vendor",
+  q: string,
+  signal?: AbortSignal,
+): Promise<RoleHit[]> {
+  const kinds =
+    kind === "all" ? (["customer", "vendor"] as const) : ([kind] as const);
   const pages = await Promise.all(
     kinds.map(async (role) => {
       const query = new URLSearchParams({ limit: "50" });
       if (q.trim() !== "") query.set("q", q.trim());
-      const body = await send<{ items?: Omit<RoleHit, "role">[] }>(`/${role}s:search?${query}`, {}, signal);
+      const body = await send<{ items?: Omit<RoleHit, "role">[] }>(
+        `/${role}s:search?${query}`,
+        {},
+        signal,
+      );
       return (body.items ?? []).map((hit): RoleHit => ({ ...hit, role }));
     }),
   );
   return pages.flat().sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function listPartyVendors(partyId: string, signal?: AbortSignal): Promise<Vendor[]> {
-  const body = await send<{ vendors: Vendor[] }>(`/parties/${id(partyId)}/vendors`, {}, signal);
+export async function listPartyVendors(
+  partyId: string,
+  signal?: AbortSignal,
+): Promise<Vendor[]> {
+  const body = await send<{ vendors: Vendor[] }>(
+    `/parties/${id(partyId)}/vendors`,
+    {},
+    signal,
+  );
   return Array.isArray(body.vendors) ? body.vendors : [];
 }
 
-export function validateTaxRegistration(input: { type: TaxType; country?: string; number: string }): Promise<TaxValidation> {
+export function validateTaxRegistration(input: {
+  type: TaxType;
+  country?: string;
+  number: string;
+}): Promise<TaxValidation> {
   const body: Record<string, string> = {
     type: input.type,
     number: input.number,
@@ -247,11 +320,18 @@ export function validateTaxRegistration(input: { type: TaxType; country?: string
   });
 }
 
-export function getPendingChange(changeId: string, signal?: AbortSignal): Promise<PendingChange> {
+export function getPendingChange(
+  changeId: string,
+  signal?: AbortSignal,
+): Promise<PendingChange> {
   return send<PendingChange>(`/pending-changes/${id(changeId)}`, {}, signal);
 }
 
-export function decidePendingChange(changeId: string, action: "approve" | "reject", reason: string): Promise<PendingChange> {
+export function decidePendingChange(
+  changeId: string,
+  action: "approve" | "reject",
+  reason: string,
+): Promise<PendingChange> {
   const body = reason === "" ? undefined : JSON.stringify({ reason });
   return send<PendingChange>(`/pending-changes/${id(changeId)}:${action}`, {
     method: "POST",
@@ -296,37 +376,79 @@ export interface AcceptProspectInput extends NewVendor {
 }
 
 /** GET /vendor-prospects: one page of registrations newest first, optionally of one status. */
-export async function listProspects(status: ProspectStatus | "", cursor?: string, signal?: AbortSignal): Promise<{ items: Prospect[]; nextCursor?: string }> {
+export async function listProspects(
+  status: ProspectStatus | "",
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<{ items: Prospect[]; nextCursor?: string }> {
   const query = new URLSearchParams({ limit: "100" });
   if (status) query.set("status", status);
   if (cursor) query.set("cursor", cursor);
-  const body = await send<{ items?: Prospect[]; nextCursor?: string }>(`/vendor-prospects?${query}`, {}, signal);
-  return { items: Array.isArray(body.items) ? body.items : [], nextCursor: body.nextCursor || undefined };
+  const body = await send<{ items?: Prospect[]; nextCursor?: string }>(
+    `/vendor-prospects?${query}`,
+    {},
+    signal,
+  );
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    nextCursor: body.nextCursor || undefined,
+  };
 }
 
-export function getProspect(prospectId: string, signal?: AbortSignal): Promise<Prospect> {
+export function getProspect(
+  prospectId: string,
+  signal?: AbortSignal,
+): Promise<Prospect> {
   return send<Prospect>(`/vendor-prospects/${id(prospectId)}`, {}, signal);
 }
 
 /** POST /vendor-prospects/{id}:accept creates the party, a blocked vendor role and the onboarding questionnaire request. */
-export function acceptProspect(prospectId: string, input: AcceptProspectInput): Promise<Prospect> {
-  return send<Prospect>(`/vendor-prospects/${id(prospectId)}:accept`, post(input));
+export function acceptProspect(
+  prospectId: string,
+  input: AcceptProspectInput,
+): Promise<Prospect> {
+  return send<Prospect>(
+    `/vendor-prospects/${id(prospectId)}:accept`,
+    post(input),
+  );
 }
 
 /** POST /vendor-prospects/{id}:reject closes the registration with a note; nothing is created. */
-export function rejectProspect(prospectId: string, note: string): Promise<Prospect> {
-  return send<Prospect>(`/vendor-prospects/${id(prospectId)}:reject`, post({ note }));
+export function rejectProspect(
+  prospectId: string,
+  note: string,
+): Promise<Prospect> {
+  return send<Prospect>(
+    `/vendor-prospects/${id(prospectId)}:reject`,
+    post({ note }),
+  );
 }
 
-export async function listQuestionnaires(signal?: AbortSignal): Promise<Questionnaire[]> {
-  const body = await send<{ items?: Questionnaire[] }>("/vendor-questionnaires", {}, signal);
+export async function listQuestionnaires(
+  signal?: AbortSignal,
+): Promise<Questionnaire[]> {
+  const body = await send<{ items?: Questionnaire[] }>(
+    "/vendor-questionnaires",
+    {},
+    signal,
+  );
   return Array.isArray(body.items) ? body.items : [];
 }
 
 /** Credit-limit changes waiting for a decision, oldest request last, a page at a time. */
-export async function listPendingChanges(cursor?: string, signal?: AbortSignal): Promise<{ items: PendingChange[]; nextCursor?: string }> {
+export async function listPendingChanges(
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<{ items: PendingChange[]; nextCursor?: string }> {
   const query = new URLSearchParams({ limit: "100" });
   if (cursor) query.set("cursor", cursor);
-  const body = await send<{ items?: PendingChange[]; nextCursor?: string }>(`/pending-changes?${query}`, {}, signal);
-  return { items: Array.isArray(body.items) ? body.items : [], nextCursor: body.nextCursor || undefined };
+  const body = await send<{ items?: PendingChange[]; nextCursor?: string }>(
+    `/pending-changes?${query}`,
+    {},
+    signal,
+  );
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    nextCursor: body.nextCursor || undefined,
+  };
 }

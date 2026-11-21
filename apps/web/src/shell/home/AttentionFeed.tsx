@@ -50,7 +50,7 @@ function Row({ item, state, decisions, onDecide }: RowProps) {
             {decision === "approve" ? copy.attention.approve : copy.attention.reject}
           </Button>
         ))}
-        <Link to={item.link} aria-label={copy.attention.reviewLabel(item.kind, item.number)}>
+        <Link to={item.link} className={pageStyles.seeAll} aria-label={copy.attention.reviewLabel(item.kind, item.number)}>
           {copy.attention.review}
         </Link>
       </span>

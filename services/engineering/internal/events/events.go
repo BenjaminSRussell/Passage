@@ -87,6 +87,7 @@ type EcoData struct {
 	ReleaseDate      string   `json:"releaseDate,omitempty"`
 	ApproverID       string   `json:"approverId,omitempty"`
 	EcrID            string   `json:"ecrId,omitempty"`
+	LegalEntityID    string   `json:"legalEntityId,omitempty"`
 }
 
 const (
