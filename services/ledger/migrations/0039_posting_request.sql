@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS posting_request (
   FOREIGN KEY (tenant_id, journal_entry_id) REFERENCES journal_entry (tenant_id, id)
 );
 
+-- GET /v1/ledger/posting-requests/{key} looks a key up across legal entities of the tenant; the primary key leads with
+-- the legal entity, so without this index that lookup would scan the tenant's rows.
+CREATE INDEX IF NOT EXISTS posting_request_key ON posting_request (tenant_id, idempotency_key, updated_at DESC);
+
 ALTER TABLE posting_request ENABLE ROW LEVEL SECURITY;
 ALTER TABLE posting_request FORCE ROW LEVEL SECURITY;
 DO $$
